@@ -25,7 +25,7 @@ func setupTestServer(adminKey string) (*Server, *http.ServeMux) {
 	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
 	traces := observability.NewTraceLogger(100)
 	wh := webhook.NewDispatcher(webhook.Config{})
-	gw := proxy.NewGatewayWithOptions(eng, nil, adminKey, traces, proxy.GatewayOptions{
+	gw := proxy.NewGatewayWithOptions(eng, nil, traces, proxy.GatewayOptions{
 		Webhook: wh,
 	})
 	srv := NewServer(eng, gw, adminKey, nil)
@@ -174,7 +174,7 @@ func TestServer_GlobalProxyKeyCannotAccessAdminEndpoints(t *testing.T) {
 	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
 	traces := observability.NewTraceLogger(100)
 	t.Cleanup(func() { _ = traces.Close() })
-	gw := proxy.NewGatewayWithOptions(eng, nil, adminKey, traces, proxy.GatewayOptions{
+	gw := proxy.NewGatewayWithOptions(eng, nil, traces, proxy.GatewayOptions{
 		GlobalProxyKey: globalProxyKey,
 	})
 	srv := NewServer(eng, gw, adminKey, nil)
@@ -199,7 +199,66 @@ func TestServer_GlobalProxyKeyCannotAccessAdminEndpoints(t *testing.T) {
 	}
 }
 
-func TestServer_TracesAreTenantScopedAndGlobalPurgeIsAdminOnly(t *testing.T) {
+func TestServer_ProxyTenantAndProviderKeysCannotAuthenticateAdminConsole(t *testing.T) {
+	const (
+		adminKey       = "admin-console-secret"
+		globalProxyKey = "global-proxy-secret"
+		tenantKey      = "tenant-proxy-secret"
+		providerKey    = "sk-provider-secret"
+		fingerprintKey = "fingerprint-secret"
+	)
+
+	v := vault.NewMemoryVault(5 * time.Minute)
+	t.Cleanup(v.Close)
+	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+	traces := observability.NewTraceLogger(100)
+	t.Cleanup(func() { _ = traces.Close() })
+	fingerprint, err := proxy.ProviderKeyFingerprint(fingerprintKey, providerKey)
+	if err != nil {
+		t.Fatalf("fingerprinting provider key: %v", err)
+	}
+	gw := proxy.NewGatewayWithOptions(eng, nil, traces, proxy.GatewayOptions{
+		GlobalProxyKey:            globalProxyKey,
+		TenantKeys:                map[string]string{"finance": tenantKey},
+		ProviderFingerprintSecret: fingerprintKey,
+		ProviderKeyFingerprints:   map[string][]string{"finance": {fingerprint}},
+	})
+	srv := NewServer(eng, gw, adminKey, nil)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	for name, key := range map[string]string{
+		"global proxy":  globalProxyKey,
+		"tenant":        tenantKey,
+		"provider BYOK": providerKey,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, _ := json.Marshal(AuthVerifyRequest{Key: key})
+			verifyReq := httptest.NewRequest(http.MethodPost, "/api/auth/verify", bytes.NewReader(body))
+			verifyW := httptest.NewRecorder()
+			mux.ServeHTTP(verifyW, verifyReq)
+			var verifyResp AuthVerifyResponse
+			if err := json.NewDecoder(verifyW.Body).Decode(&verifyResp); err != nil {
+				t.Fatalf("decoding auth response: %v", err)
+			}
+			if verifyResp.Valid {
+				t.Fatalf("%s key authenticated the admin console", name)
+			}
+
+			for _, endpoint := range []string{"/api/traces", "/api/vault", "/api/test-anonymize"} {
+				req := httptest.NewRequest(http.MethodGet, endpoint, nil)
+				req.Header.Set("Authorization", "Bearer "+key)
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				if w.Code != http.StatusUnauthorized {
+					t.Fatalf("%s key accessed %s: got %d, want 401", name, endpoint, w.Code)
+				}
+			}
+		})
+	}
+}
+
+func TestServer_AdminCanFilterAndPurgeTenantTraces(t *testing.T) {
 	const adminKey = "admin-secret-key"
 	srv, mux := setupTestServer(adminKey)
 	srv.gateway.UpdateDynamicConfig(nil,
@@ -209,23 +268,31 @@ func TestServer_TracesAreTenantScopedAndGlobalPurgeIsAdminOnly(t *testing.T) {
 	srv.gateway.Traces().Record(observability.Trace{ID: "trace-a", Tenant: "tenant-a", Timestamp: time.Now()})
 	srv.gateway.Traces().Record(observability.Trace{ID: "trace-b", Tenant: "tenant-b", Timestamp: time.Now()})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
-	req.Header.Set("Authorization", "Bearer tenant-a-key")
+	tenantReq := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
+	tenantReq.Header.Set("Authorization", "Bearer tenant-a-key")
+	tenantW := httptest.NewRecorder()
+	mux.ServeHTTP(tenantW, tenantReq)
+	if tenantW.Code != http.StatusUnauthorized {
+		t.Fatalf("tenant accessed admin traces: got %d, want 401", tenantW.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces?tenant_id=tenant-a", nil)
+	req.Header.Set("Authorization", "Bearer "+adminKey)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("tenant traces returned %d: %s", w.Code, w.Body.String())
+		t.Fatalf("admin tenant filter returned %d: %s", w.Code, w.Body.String())
 	}
 	if strings.Contains(w.Body.String(), "trace-b") || !strings.Contains(w.Body.String(), "trace-a") {
-		t.Fatalf("tenant-a received traces outside its scope: %s", w.Body.String())
+		t.Fatalf("admin tenant filter returned traces outside its scope: %s", w.Body.String())
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/traces", nil)
-	deleteReq.Header.Set("Authorization", "Bearer tenant-a-key")
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/traces?tenant_id=tenant-a", nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+adminKey)
 	deleteW := httptest.NewRecorder()
 	mux.ServeHTTP(deleteW, deleteReq)
 	if deleteW.Code != http.StatusOK {
-		t.Fatalf("tenant trace purge returned %d: %s", deleteW.Code, deleteW.Body.String())
+		t.Fatalf("admin tenant purge returned %d: %s", deleteW.Code, deleteW.Body.String())
 	}
 
 	remaining := srv.gateway.Traces().GetAll()
@@ -340,7 +407,7 @@ func TestServer_TestAnonymize_PolicyBlockAndWebhook(t *testing.T) {
 	const secretKey = "test_secret_key_123"
 	srv, mux := setupTestServer(secretKey)
 
-	// Configure global policy to block CPF and tenant_01 policy to block EMAIL
+	// Configure global policy to block CPF and a tenant key that must remain proxy-only.
 	srv.gateway.UpdateDynamicConfig(
 		map[string]string{"CPF": "block"},
 		map[string]string{"tenant_01": "key_tenant_01"},
@@ -393,7 +460,7 @@ func TestServer_TestAnonymize_PolicyBlockAndWebhook(t *testing.T) {
 		t.Fatalf("unexpected trace status: %+v", traces[0])
 	}
 
-	// 2. Tenant 01 key sending EMAIL -> should be blocked by tenant override policy
+	// 2. Tenant keys cannot use the administrative Playground endpoint.
 	payloadEmail := `{"prompt":"Contato suporte@empresa.com","record_trace":true,"provider":"anthropic","model":"claude.ai"}`
 	reqTenant := httptest.NewRequest(http.MethodPost, "/api/test-anonymize", bytes.NewBufferString(payloadEmail))
 	reqTenant.Header.Set("Content-Type", "application/json")
@@ -401,16 +468,48 @@ func TestServer_TestAnonymize_PolicyBlockAndWebhook(t *testing.T) {
 	wTenant := httptest.NewRecorder()
 
 	mux.ServeHTTP(wTenant, reqTenant)
-	if wTenant.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 Forbidden for tenant blocked EMAIL, got %d: %s", wTenant.Code, wTenant.Body.String())
+	if wTenant.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for tenant Playground access, got %d: %s", wTenant.Code, wTenant.Body.String())
 	}
 
 	tracesAfter := srv.gateway.Traces().GetAll()
-	if len(tracesAfter) != 2 {
-		t.Fatalf("expected 2 traces, got %d", len(tracesAfter))
+	if len(tracesAfter) != 1 {
+		t.Fatalf("unauthorized tenant request created a trace: %+v", tracesAfter)
 	}
-	if tracesAfter[0].Tenant != "tenant_01" || tracesAfter[0].PolicyAction != "block" {
-		t.Fatalf("unexpected tenant trace: %+v", tracesAfter[0])
+}
+
+func TestServer_TestAnonymize_DisabledEntityDoesNotPersistPlaintext(t *testing.T) {
+	const secretKey = "test_secret_key_123"
+	const rawCPF = "529.982.247-25"
+	srv, mux := setupTestServer(secretKey)
+	srv.gateway.UpdateDynamicConfig(
+		map[string]string{"CPF": "disabled"}, nil, nil, nil, 0, "",
+	)
+
+	payload := `{"prompt":"CPF 529.982.247-25","record_trace":true,"provider":"openai","model":"chatgpt.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/test-anonymize", bytes.NewBufferString(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected disabled entity request to pass, got %d: %s", w.Code, w.Body.String())
+	}
+	var response TestAnonymizeResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode anonymize response: %v", err)
+	}
+	if !strings.Contains(response.Sanitized, rawCPF) {
+		t.Fatalf("disabled CPF should remain unchanged in the administrative response: %q", response.Sanitized)
+	}
+	if len(response.Entities) != 0 || len(response.TokenMap) != 0 {
+		t.Fatalf("disabled CPF must not create entities or vault mappings: %+v", response)
+	}
+
+	traces := srv.gateway.Traces().GetAll()
+	if len(traces) != 1 || traces[0].SanitizedPrompt != "" {
+		t.Fatalf("plaintext-capable policy persisted prompt content: %+v", traces)
 	}
 }
 

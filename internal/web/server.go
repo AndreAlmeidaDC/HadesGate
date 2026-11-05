@@ -85,48 +85,6 @@ func requestAPIKey(r *http.Request) string {
 	return ""
 }
 
-// authenticate checks if the request contains a valid admin API key or tenant proxy key.
-// Returns the resolved tenant ID and true if authenticated.
-func (s *Server) authenticate(r *http.Request) (string, bool) {
-	key := requestAPIKey(r)
-	if key == "" {
-		return "", false
-	}
-
-	if s.adminKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(s.adminKey)) == 1 {
-		return "default", true
-	}
-
-	if s.gateway != nil {
-		if tenant, ok := s.gateway.AuthenticateKey(key); ok {
-			return tenant, true
-		}
-		if tenant, ok := s.gateway.AuthenticateProviderKey(key); ok {
-			return tenant, true
-		}
-	}
-
-	return "", false
-}
-
-// requireAuth wraps an http.HandlerFunc to enforce valid API key authentication (admin or tenant).
-func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := s.authenticate(r); !ok {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]string{
-					"message": "Unauthorized: Invalid or missing API key",
-					"type":    "auth_error",
-				},
-			})
-			return
-		}
-		next(w, r)
-	}
-}
-
 // requireAdminAuth enforces that only the master administrator key can access administrative settings.
 func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -161,9 +119,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 
 	// Protected management API endpoints (enforces API key)
-	mux.HandleFunc("/api/test-anonymize", s.requireAuth(s.handleTestAnonymize))
-	mux.HandleFunc("/api/vault", s.requireAuth(s.handleVault))
-	mux.HandleFunc("/api/traces", s.requireAuth(s.handleTraces))
+	mux.HandleFunc("/api/test-anonymize", s.requireAdminAuth(s.handleTestAnonymize))
+	mux.HandleFunc("/api/vault", s.requireAdminAuth(s.handleVault))
+	mux.HandleFunc("/api/traces", s.requireAdminAuth(s.handleTraces))
 	mux.HandleFunc("/api/config", s.requireAdminAuth(s.handleConfig))
 	mux.HandleFunc("/api/tenants", s.requireAdminAuth(s.handleTenants))
 	mux.HandleFunc("/api/provider-credentials", s.requireAdminAuth(s.handleProviderCredentials))
@@ -266,7 +224,7 @@ type StatusResponse struct {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	_, isAuth := s.authenticate(r)
+	isAuth := s.isAdminRequest(r)
 
 	// Unauthenticated callers get a basic status ping without operational metrics
 	if !isAuth {
@@ -336,16 +294,20 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 	var randBytes [8]byte
 	_, _ = rand.Read(randBytes[:])
 	testSessionID := fmt.Sprintf("ext_%d_%s", time.Now().UnixNano(), hex.EncodeToString(randBytes[:]))
-	res := s.engine.Anonymize(testSessionID, req.Prompt)
+	tenant := "default"
+	var tenantPolicy *policy.Engine
+	if s.gateway != nil {
+		tenantPolicy = s.gateway.PolicyForTenant(tenant)
+	}
+	res := s.engine.AnonymizeWithOptions(testSessionID, req.Prompt, anonymizer.AnonymizeOptions{
+		IsTypeDisabled: func(entityType detector.EntityType) bool {
+			return tenantPolicy != nil && tenantPolicy.IsDisabled(string(entityType))
+		},
+	})
 	s.engine.Vault().DeleteSession(testSessionID)
 	elapsed := (time.Since(start).Nanoseconds() + 500) / 1000
 	if elapsed == 0 && len(req.Prompt) > 0 {
 		elapsed = 1
-	}
-
-	tenant, _ := s.authenticate(r)
-	if tenant == "" {
-		tenant = "default"
 	}
 
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
@@ -399,7 +361,7 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 				EntityTypes:     detectedTypes,
 				PIITypes:        piiTypes,
 				SecretTypes:     secretTypes,
-				SanitizedPrompt: res.SanitizedText,
+				SanitizedPrompt: telemetryPrompt(tenantPolicy, res.SanitizedText),
 			})
 		}
 
@@ -431,7 +393,7 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 			EntityTypes:     detectedTypes,
 			PIITypes:        piiTypes,
 			SecretTypes:     secretTypes,
-			SanitizedPrompt: res.SanitizedText,
+			SanitizedPrompt: telemetryPrompt(tenantPolicy, res.SanitizedText),
 		})
 	}
 
@@ -447,6 +409,13 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func telemetryPrompt(tenantPolicy *policy.Engine, sanitizedPrompt string) string {
+	if tenantPolicy != nil && tenantPolicy.HasDisabledActions() {
+		return ""
+	}
+	return sanitizedPrompt
+}
+
 func (s *Server) handleVault(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]interface{}{
@@ -457,16 +426,11 @@ func (s *Server) handleVault(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	tenant, _ := s.authenticate(r)
-	isAdmin := s.isAdminRequest(r)
 	requestedTenant := strings.TrimSpace(r.URL.Query().Get("tenant_id"))
-	if !isAdmin || requestedTenant == "" {
-		requestedTenant = tenant
-	}
 
 	if r.Method == http.MethodDelete {
 		if s.gateway.Traces() != nil {
-			if isAdmin && strings.TrimSpace(r.URL.Query().Get("tenant_id")) == "" {
+			if requestedTenant == "" {
 				s.gateway.Traces().Clear()
 			} else if err := s.gateway.Traces().ClearTenant(requestedTenant); err != nil {
 				http.Error(w, `{"error":{"message":"failed to clear tenant traces"}}`, http.StatusInternalServerError)
@@ -502,7 +466,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		}
 		var pagedTraces []observability.Trace
 		var totalCount int
-		if isAdmin && strings.TrimSpace(r.URL.Query().Get("tenant_id")) == "" {
+		if requestedTenant == "" {
 			pagedTraces, totalCount = s.gateway.Traces().GetPaged(limit, offset)
 			summary = s.gateway.Traces().GetSummary()
 		} else {
@@ -563,12 +527,6 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	isValid := s.adminKey != "" && subtle.ConstantTimeCompare([]byte(reqKey), []byte(s.adminKey)) == 1
-	if !isValid && s.gateway != nil {
-		_, isValid = s.gateway.AuthenticateKey(reqKey)
-		if !isValid {
-			_, isValid = s.gateway.AuthenticateProviderKey(reqKey)
-		}
-	}
 	json.NewEncoder(w).Encode(AuthVerifyResponse{
 		Valid:   isValid,
 		DevMode: false,

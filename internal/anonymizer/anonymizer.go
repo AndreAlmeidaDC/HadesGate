@@ -33,6 +33,13 @@ type Result struct {
 	TokenMap      map[string]string `json:"token_map"`
 }
 
+// AnonymizeOptions customizes detection for a single request without mutating the engine.
+type AnonymizeOptions struct {
+	// IsTypeDisabled is evaluated before a match is retained. Returning true lets
+	// that entity pass through unchanged and excludes it from metrics and the vault.
+	IsTypeDisabled func(detector.EntityType) bool
+}
+
 // Engine coordinates PII detectors and token vault management.
 type Engine struct {
 	detectors        []detector.Detector
@@ -93,19 +100,19 @@ type Config struct {
 // DefaultConfig returns the default configuration with all Brazilian LGPD, international and secret detectors enabled.
 func DefaultConfig() Config {
 	return Config{
-		EnableCPF:        true,
-		EnableCNPJ:       true,
-		EnablePhone:      true,
-		EnableEmail:      true,
-		EnableCreditCard: true,
-		EnableName:       true,
-		EnableCEP:        true,
-		EnablePIX:        true,
-		EnableRG:         true,
-		EnableCNH:        true,
-		EnableBank:       true,
-		EnableIBAN:       true,
-		EnablePassport:   true,
+		EnableCPF:           true,
+		EnableCNPJ:          true,
+		EnablePhone:         true,
+		EnableEmail:         true,
+		EnableCreditCard:    true,
+		EnableName:          true,
+		EnableCEP:           true,
+		EnablePIX:           true,
+		EnableRG:            true,
+		EnableCNH:           true,
+		EnableBank:          true,
+		EnableIBAN:          true,
+		EnablePassport:      true,
 		EnableIPAddress:     true,
 		EnableAPIKey:        true,
 		EnableSecret:        true,
@@ -125,7 +132,7 @@ func DefaultConfig() Config {
 		EnableCID:           true,
 		EnableMedication:    true,
 		MinConfidence:       0.70,
-		SessionTTL:       10 * time.Minute,
+		SessionTTL:          10 * time.Minute,
 	}
 }
 
@@ -305,6 +312,11 @@ func (e *Engine) MedicationDetector() *detector.MedicationDetector {
 // Anonymize scans the text for sensitive information, replaces it with surrogate tokens,
 // stores the token mapping in the vault, and returns the sanitized text.
 func (e *Engine) Anonymize(sessionID, text string) Result {
+	return e.AnonymizeWithOptions(sessionID, text, AnonymizeOptions{})
+}
+
+// AnonymizeWithOptions scans and anonymizes text using request-scoped policy options.
+func (e *Engine) AnonymizeWithOptions(sessionID, text string, options AnonymizeOptions) Result {
 	if text == "" {
 		return Result{SanitizedText: "", Entities: nil, TokenMap: nil}
 	}
@@ -313,6 +325,9 @@ func (e *Engine) Anonymize(sessionID, text string) Result {
 
 	// 1. Scan Denylist terms first with maximum priority (UTF-8 byte-safe regex indices)
 	for _, rx := range e.denylistRegexes {
+		if options.IsTypeDisabled != nil && options.IsTypeDisabled(detector.EntityType("CONFIDENTIAL")) {
+			break
+		}
 		indices := rx.FindAllStringIndex(text, -1)
 		for _, idx := range indices {
 			allMatches = append(allMatches, detector.Match{
@@ -330,6 +345,9 @@ func (e *Engine) Anonymize(sessionID, text string) Result {
 	for _, d := range e.detectors {
 		matches := d.Detect(text)
 		for _, m := range matches {
+			if options.IsTypeDisabled != nil && options.IsTypeDisabled(m.Type) {
+				continue
+			}
 			// Apply dynamic Confidence Score filter (per entity or family)
 			if m.Score < e.ThresholdFor(m.Type) {
 				continue

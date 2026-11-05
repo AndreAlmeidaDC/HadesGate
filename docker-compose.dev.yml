@@ -11,6 +11,7 @@ services:
     env_file:
       - .env
     environment:
+      - HADESGATE_BIND_ADDRESS=0.0.0.0
       - HADESGATE_DB_PATH=/app/data/hadesgate-dev.db
     volumes:
       - .:/src

@@ -33,9 +33,10 @@
 
 ## Phase 3 — Privacy Policies
 
-- [x] Add per-entity actions: `mask`, `block`, and `route_local`.
+- [x] Add global and tenant-scoped entity actions: `mask`, `block`, `route_local`, and explicit `disabled` bypass with UI risk warnings.
 - [x] Separate proxy credentials (`HADESGATE_PROXY_KEY`) from administrative credentials (`HADESGATE_ADMIN_KEY`).
 - [x] Add tenant-scoped policies and safe audit metadata.
+- [x] Allow tenant overrides to disable an entity or macro-family without disabling other detectors; inherited rules continue to follow the global policy.
 - [x] Add an optional local-provider route for sensitive requests (`route_local` pointing to Ollama/local).
 
 ## Phase 4 — Optional Semantic Detection
@@ -104,6 +105,8 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 ### Phase 17 — BYOK Transparente Seguro & Separação de Privilégios
 
 - [x] Separar autorização administrativa de chaves globais e de tenants, impedindo elevação de privilégio por `proxy_key`.
+- [x] Restringir login, sessão restaurada, Playground, vault e traces do Console exclusivamente a `HADESGATE_ADMIN_KEY`; tenant/BYOK permanecem proxy-only.
+- [x] Remover `HADESGATE_ADMIN_KEY` dos endpoints de modelos, concluindo a separação bidirecional entre credenciais administrativas e de proxy.
 - [x] Autenticar o tenant por fingerprint HMAC-SHA256 da chave original do provedor, mantendo o fluxo de troca exclusiva da `base_url`.
 - [x] Persistir apenas fingerprint, provedor, rótulo e dica curta; nunca a chave BYOK original.
 - [x] Adicionar cadastro e revogação de credenciais BYOK no Console e na API administrativa.
@@ -113,15 +116,16 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 - [ ] Criptografar os demais segredos operacionais persistidos no SQLite e torná-los write-only na API.
 - [x] Isolar consultas e purge de traces por tenant, mantendo consulta e purge global exclusivos do administrador.
 - [x] Fechar CORS por padrão, rejeitar preflight não autorizado e conceder Private Network Access apenas a origens explicitamente permitidas.
-- [ ] Bloquear SSRF por resolução DNS/IP, inclusive loopback, link-local, redes privadas e DNS rebinding fora de upstreams locais explicitamente autorizados.
-- [ ] Aplicar recarga dinâmica de CORS, headers HTTP adicionais e bind de rede local por padrão com opt-in explícito para exposição externa.
+- [x] Bloquear SSRF por resolução DNS/IP, inclusive loopback, link-local, redes privadas e DNS rebinding fora de upstreams locais explicitamente autorizados.
+- [ ] Aplicar recarga dinâmica de CORS e headers HTTP adicionais.
+- [x] Usar bind de rede local por padrão com opt-in explícito para exposição externa e perfil Docker documentado.
 
 ### Phase 18 — Segredos Operacionais & Zero-Trust Runtime
 
 - [ ] Criptografar segredos operacionais persistidos com AES-256-GCM e chave mestra externa ao SQLite.
 - [ ] Tornar campos secretos write-only na API e no Console, com rotação sem exposição do valor atual.
-- [ ] Adicionar proteção SSRF baseada em resolução DNS/IP e validação em cada redirecionamento/conexão.
-- [ ] Introduzir `HADESGATE_BIND_ADDRESS` seguro por padrão e perfis explícitos para Docker/Kubernetes.
+- [x] Adicionar proteção SSRF baseada em resolução DNS/IP, conexão fixada ao IP validado e bloqueio de redirecionamentos.
+- [x] Introduzir `HADESGATE_BIND_ADDRESS` seguro por padrão e perfil explícito para Docker Compose.
 - [ ] Eliminar data races em recargas dinâmicas com snapshots imutáveis/atômicos de configuração.
 
 ### Phase 19 — Governança, Retenção & Auditoria Enterprise

@@ -14,6 +14,7 @@ import (
 
 // Config encapsulates runtime configuration for the HadesGate gateway.
 type Config struct {
+	BindAddress                 string
 	Port                        int
 	AdminKey                    string
 	ProxyKey                    string
@@ -27,7 +28,9 @@ type Config struct {
 	GeminiKey                   string
 	OllamaBaseURL               string
 	AllowDynamicUpstream        bool
+	AllowPrivateDynamicUpstream bool
 	DynamicUpstreamAllowedHosts []string
+	PrivateUpstreamAllowedHosts []string
 	MaxConcurrentRequests       int
 	MaxResponseBytes            int64
 	MaxSSEEventBytes            int
@@ -80,6 +83,7 @@ type Config struct {
 // Load reads configuration from command-line flags and environment variables.
 func Load() *Config {
 	cfg := &Config{
+		BindAddress:                "127.0.0.1",
 		Port:                       8080,
 		AdminKey:                   "",
 		ProxyKey:                   "",
@@ -138,6 +142,9 @@ func Load() *Config {
 	}
 
 	// Environment variable overrides (HADESGATE_* primary, PRIVAGATE_* legacy fallback)
+	if val := strings.TrimSpace(getEnvAny("HADESGATE_BIND_ADDRESS", "PRIVAGATE_BIND_ADDRESS")); val != "" {
+		cfg.BindAddress = val
+	}
 	if val := getEnvAny("HADESGATE_PORT", "PRIVAGATE_PORT", "PORT"); val != "" {
 		if p, err := strconv.Atoi(val); err == nil {
 			cfg.Port = p
@@ -189,10 +196,20 @@ func Load() *Config {
 	if val := getEnvAny("HADESGATE_ALLOW_DYNAMIC_UPSTREAM", "PRIVAGATE_ALLOW_DYNAMIC_UPSTREAM"); val != "" {
 		cfg.AllowDynamicUpstream = strings.EqualFold(val, "true") || val == "1"
 	}
+	if val := getEnvAny("HADESGATE_ALLOW_PRIVATE_DYNAMIC_UPSTREAM", "PRIVAGATE_ALLOW_PRIVATE_DYNAMIC_UPSTREAM"); val != "" {
+		cfg.AllowPrivateDynamicUpstream = strings.EqualFold(val, "true") || val == "1"
+	}
 	if val := getEnvAny("HADESGATE_DYNAMIC_UPSTREAM_ALLOWED_HOSTS", "PRIVAGATE_DYNAMIC_UPSTREAM_ALLOWED_HOSTS"); val != "" {
 		for _, host := range strings.Split(val, ",") {
 			if host = strings.TrimSpace(host); host != "" {
 				cfg.DynamicUpstreamAllowedHosts = append(cfg.DynamicUpstreamAllowedHosts, host)
+			}
+		}
+	}
+	if val := getEnvAny("HADESGATE_PRIVATE_UPSTREAM_ALLOWED_HOSTS", "PRIVAGATE_PRIVATE_UPSTREAM_ALLOWED_HOSTS"); val != "" {
+		for _, entry := range strings.Split(val, ",") {
+			if host := strings.TrimSpace(entry); host != "" {
+				cfg.PrivateUpstreamAllowedHosts = append(cfg.PrivateUpstreamAllowedHosts, host)
 			}
 		}
 	}
@@ -392,6 +409,7 @@ func Load() *Config {
 
 	// CLI flags (registered and parsed when invoked from CLI entrypoint)
 	if !flag.Parsed() && flag.Lookup("port") == nil {
+		flag.StringVar(&cfg.BindAddress, "bind-address", cfg.BindAddress, "HTTP server bind address")
 		flag.IntVar(&cfg.Port, "port", cfg.Port, "HTTP server port")
 		flag.StringVar(&cfg.AdminKey, "admin-key", cfg.AdminKey, "Admin API key for dashboard and proxy")
 		flag.StringVar(&cfg.ProxyKey, "proxy-key", cfg.ProxyKey, "API key accepted by model proxy endpoints")
@@ -405,6 +423,7 @@ func Load() *Config {
 		flag.StringVar(&cfg.GeminiKey, "gemini-key", cfg.GeminiKey, "Google Gemini API key")
 		flag.StringVar(&cfg.OllamaBaseURL, "ollama-url", cfg.OllamaBaseURL, "Ollama base URL")
 		flag.BoolVar(&cfg.AllowDynamicUpstream, "allow-dynamic-upstream", cfg.AllowDynamicUpstream, "Allow X-Upstream-Url for explicitly allowlisted hosts")
+		flag.BoolVar(&cfg.AllowPrivateDynamicUpstream, "allow-private-dynamic-upstream", cfg.AllowPrivateDynamicUpstream, "Allow dynamic upstream allowlist entries to resolve to loopback or private networks")
 		flag.IntVar(&cfg.MaxConcurrentRequests, "max-concurrent-requests", cfg.MaxConcurrentRequests, "Maximum concurrent proxy requests")
 		flag.StringVar(&cfg.SQLiteDBPath, "db-path", cfg.SQLiteDBPath, "SQLite file path for non-sensitive anonymization telemetry")
 		flag.Float64Var(&cfg.AnonymizerMinScore, "anonymizer-min-score", cfg.AnonymizerMinScore, "Minimum confidence score for PII detection")
@@ -435,6 +454,9 @@ func Load() *Config {
 			cfg.ProxyKey = fmt.Sprintf("hadesgate_proxy_%x", bytes)
 			log.Printf("⚠️  [SECURITY NOTICE] HADESGATE_PROXY_KEY matched HADESGATE_ADMIN_KEY and was replaced with an ephemeral, non-admin proxy key.\n")
 		}
+	}
+	if cfg.BindAddress = strings.TrimSpace(cfg.BindAddress); cfg.BindAddress == "" {
+		cfg.BindAddress = "127.0.0.1"
 	}
 
 	return cfg

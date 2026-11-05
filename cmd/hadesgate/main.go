@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -175,7 +176,9 @@ func main() {
 		OllamaBaseURL:               cfg.OllamaBaseURL,
 		AdminKey:                    cfg.ProxyKey,
 		AllowDynamicUpstream:        cfg.AllowDynamicUpstream,
+		AllowPrivateDynamicUpstream: cfg.AllowPrivateDynamicUpstream,
 		DynamicUpstreamAllowedHosts: cfg.DynamicUpstreamAllowedHosts,
+		PrivateUpstreamAllowedHosts: cfg.PrivateUpstreamAllowedHosts,
 		MaxResponseBytes:            cfg.MaxResponseBytes,
 		MaxSSEEventBytes:            cfg.MaxSSEEventBytes,
 		EnableEgressScan:            cfg.EnableEgressScan,
@@ -184,7 +187,7 @@ func main() {
 	})
 
 	// 7. Initialize Gateway Proxy Handler
-	gateway := proxy.NewGatewayWithOptions(engine, upstream, cfg.AdminKey, traceLogger, proxy.GatewayOptions{
+	gateway := proxy.NewGatewayWithOptions(engine, upstream, traceLogger, proxy.GatewayOptions{
 		MaxConcurrent:             cfg.MaxConcurrentRequests,
 		GlobalProxyKey:            cfg.ProxyKey,
 		EntityActions:             cfg.EntityActions,
@@ -238,7 +241,7 @@ func main() {
 	handler := web.SecurityMiddleware(mux, cfg.CORSAllowedOrigins)
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
+		Addr:         net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Port)),
 		Handler:      handler,
 		ReadTimeout:  120 * time.Second,
 		WriteTimeout: 120 * time.Second,
@@ -250,7 +253,7 @@ func main() {
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("🚀 HadesGate Gateway running on http://0.0.0.0:%d\n", cfg.Port)
+		log.Printf("🚀 HadesGate Gateway listening on http://%s\n", server.Addr)
 		log.Printf("📊 Dashboard: http://localhost:%d/\n", cfg.Port)
 		log.Printf("🔒 OpenAI Proxy: http://localhost:%d/v1/chat/completions\n", cfg.Port)
 		if cfg.AdminKey == "" {

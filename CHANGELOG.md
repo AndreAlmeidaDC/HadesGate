@@ -20,6 +20,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
   - DLP incremental em streams SSE com buffers independentes para conteúdo e argumentos de ferramentas fragmentados em OpenAI-compatible, Responses, Anthropic e Gemini.
   - Isolamento de consultas e exclusão de traces por tenant; somente o administrador pode consultar ou apagar a telemetria global.
   - CORS fechado por padrão, preflight não autorizado rejeitado e Private Network Access condicionado a uma origem permitida.
+- **Fase 18 — Zero-Trust Runtime**:
+  - Proteção SSRF com validação de todos os resultados DNS, bloqueio permanente de metadata/link-local e conexão fixada ao IP validado contra DNS rebinding.
+  - Redes loopback/RFC1918 exigem autorização explícita; allowlist de upstream dinâmico continua validando host e porta exatos.
+  - Servidor HTTP passa a escutar em `127.0.0.1` por padrão via `HADESGATE_BIND_ADDRESS`; Docker Compose declara `0.0.0.0` apenas dentro do container.
+  - Login e restauração de sessão do Console agora aceitam exclusivamente `HADESGATE_ADMIN_KEY`; chaves globais de proxy, tenant e BYOK ficam restritas ao tráfego de IA.
+  - `HADESGATE_ADMIN_KEY` deixou de autenticar endpoints de modelos; clientes de IA devem usar `HADESGATE_PROXY_KEY`, chave de tenant ou BYOK registrada.
+  - Playground, vault e traces do Console passaram de autenticação genérica para autorização administrativa em tempo constante.
+  - Nova ação DLP `disabled`, configurável globalmente, por macro-família, entidade e tenant, com override/herança no Console e alerta explícito de passagem em texto puro.
+  - Entidades desativadas deixam de participar da detecção, tokenização, vault, métricas e decisões `block`/`route_local`, preservando as demais proteções na mesma requisição.
+  - A telemetria omite o conteúdo do prompt quando a política efetiva contém `disabled`, impedindo persistência acidental de plaintext no SQLite.
 - **Fase 11 — Endurecimento de Segurança, DLP de Saída & Métricas Prometheus**:
   - Middleware de segurança e CORS estrito (`internal/web/security.go`) configurável via `HADESGATE_CORS_ALLOWED_ORIGINS` com suporte a extensões de navegador (`chrome-extension://*`) e headers de proteção OWASP (`nosniff`, `DENY`, `strict-origin-when-cross-origin`).
   - Rate Limiter contínuo Token Bucket (`internal/proxy/gateway.go`) com recarga fracionada temporal, substituindo o algoritmo de janela fixa e eliminando rajadas na virada de janela.

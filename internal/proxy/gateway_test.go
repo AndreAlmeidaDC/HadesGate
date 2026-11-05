@@ -17,12 +17,40 @@ import (
 	"github.com/hadesgate/hadesgate/internal/webhook"
 )
 
-func newTestGateway(adminKey string, upstream *UpstreamDispatcher) *Gateway {
+func newTestGateway(proxyKey string, upstream *UpstreamDispatcher) *Gateway {
 	memVault := vault.NewMemoryVault(time.Minute)
 	anonCfg := anonymizer.DefaultConfig()
 	engine := anonymizer.NewEngine(anonCfg, memVault)
 	traces := observability.NewTraceLogger(100)
-	return NewGateway(engine, upstream, adminKey, traces)
+	return NewGatewayWithOptions(engine, upstream, traces, GatewayOptions{GlobalProxyKey: proxyKey})
+}
+
+func TestGateway_AdminKeyCannotAuthenticateModelProxy(t *testing.T) {
+	v := vault.NewMemoryVault(time.Minute)
+	t.Cleanup(v.Close)
+	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+	traces := observability.NewTraceLogger(10)
+	t.Cleanup(func() { _ = traces.Close() })
+	gw := NewGatewayWithOptions(eng, nil, traces, GatewayOptions{
+		GlobalProxyKey: "model-proxy-secret",
+	})
+	body := `{"model":"mock","messages":[{"role":"user","content":"hello"}]}`
+
+	adminReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	adminReq.Header.Set("Authorization", "Bearer admin-only-secret")
+	adminW := httptest.NewRecorder()
+	gw.HandleChatCompletions(adminW, adminReq)
+	if adminW.Code != http.StatusUnauthorized {
+		t.Fatalf("admin key authenticated model proxy: got %d, want 401", adminW.Code)
+	}
+
+	proxyReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	proxyReq.Header.Set("Authorization", "Bearer model-proxy-secret")
+	proxyW := httptest.NewRecorder()
+	gw.HandleChatCompletions(proxyW, proxyReq)
+	if proxyW.Code != http.StatusOK {
+		t.Fatalf("proxy key did not authenticate model proxy: got %d: %s", proxyW.Code, proxyW.Body.String())
+	}
 }
 
 func TestGatewayHandleModels(t *testing.T) {
@@ -245,9 +273,10 @@ func TestGatewayAnthropicMasksAndRestoresContent(t *testing.T) {
 
 func TestGatewayEntityPolicyBlock(t *testing.T) {
 	base := newTestGateway("secret-key", nil)
-	gw := NewGatewayWithOptions(base.engine, nil, "secret-key", base.traces, GatewayOptions{
-		MaxConcurrent: 4,
-		EntityActions: map[string]string{"CPF": "block"},
+	gw := NewGatewayWithOptions(base.engine, nil, base.traces, GatewayOptions{
+		MaxConcurrent:  4,
+		GlobalProxyKey: "secret-key",
+		EntityActions:  map[string]string{"CPF": "block"},
 	})
 	body := []byte(`{"model":"mock","messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
@@ -287,9 +316,10 @@ func TestGatewayEntityPolicyRoutesLocal(t *testing.T) {
 		OpenAIBaseURL: "https://cloud.invalid/v1", OpenAIKey: "cloud-key",
 		OllamaBaseURL: server.URL + "/v1",
 	})
-	gw := NewGatewayWithOptions(base.engine, upstream, "secret-key", base.traces, GatewayOptions{
-		MaxConcurrent: 4,
-		EntityActions: map[string]string{"CPF": "route_local"},
+	gw := NewGatewayWithOptions(base.engine, upstream, base.traces, GatewayOptions{
+		MaxConcurrent:  4,
+		GlobalProxyKey: "secret-key",
+		EntityActions:  map[string]string{"CPF": "route_local"},
 	})
 	body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
@@ -330,9 +360,10 @@ func TestGatewayEntityPolicyRoutesLocal(t *testing.T) {
 
 func TestGatewayTenantScopedPolicy(t *testing.T) {
 	base := newTestGateway("default-key", nil)
-	gw := NewGatewayWithOptions(base.engine, nil, "default-key", base.traces, GatewayOptions{
-		MaxConcurrent: 4,
-		TenantKeys:    map[string]string{"regulated": "tenant-key"},
+	gw := NewGatewayWithOptions(base.engine, nil, base.traces, GatewayOptions{
+		MaxConcurrent:  4,
+		GlobalProxyKey: "default-key",
+		TenantKeys:     map[string]string{"regulated": "tenant-key"},
 		TenantEntityActions: map[string]map[string]string{
 			"regulated": {"CPF": "block"},
 		},
@@ -356,10 +387,142 @@ func TestGatewayTenantScopedPolicy(t *testing.T) {
 	}
 }
 
+func TestGateway_DisabledDLPActionGlobalAndTenant(t *testing.T) {
+	const rawCPF = "529.982.247-25"
+
+	requests := make(chan string, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode upstream request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		for _, message := range payload.Messages {
+			if message.Role == "user" {
+				requests <- message.Content
+				break
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []interface{}{map[string]interface{}{
+				"message": map[string]interface{}{"role": "assistant", "content": "ok"},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	newGateway := func(options GatewayOptions) *Gateway {
+		v := vault.NewMemoryVault(time.Minute)
+		t.Cleanup(v.Close)
+		engine := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+		traces := observability.NewTraceLogger(10)
+		t.Cleanup(func() { _ = traces.Close() })
+		upstream := NewUpstreamDispatcher(UpstreamConfig{OpenAIBaseURL: server.URL, OpenAIKey: "upstream-key"})
+		return NewGatewayWithOptions(engine, upstream, traces, options)
+	}
+
+	send := func(gw *Gateway, key string) string {
+		t.Helper()
+		body := []byte(`{"model":"gpt-4o","messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		w := httptest.NewRecorder()
+		gw.HandleChatCompletions(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request failed: status=%d body=%s", w.Code, w.Body.String())
+		}
+		return <-requests
+	}
+
+	globalGateway := newGateway(GatewayOptions{
+		GlobalProxyKey: "global-key",
+		EntityActions:  map[string]string{"CPF": "disabled"},
+	})
+	if upstreamText := send(globalGateway, "global-key"); !strings.Contains(upstreamText, rawCPF) {
+		t.Fatalf("globally disabled CPF was still anonymized: %q", upstreamText)
+	}
+	if traces := globalGateway.Traces().GetAll(); len(traces) != 1 || traces[0].SanitizedPrompt != "" {
+		t.Fatalf("plaintext-capable policy must suppress persisted prompts: %+v", traces)
+	}
+
+	tenantGateway := newGateway(GatewayOptions{
+		GlobalProxyKey: "global-key",
+		EntityActions:  map[string]string{"CPF": "mask"},
+		TenantKeys:     map[string]string{"analytics": "tenant-key"},
+		TenantEntityActions: map[string]map[string]string{
+			"analytics": {"CPF": "disabled"},
+		},
+	})
+	if upstreamText := send(tenantGateway, "tenant-key"); !strings.Contains(upstreamText, rawCPF) {
+		t.Fatalf("tenant-disabled CPF was still anonymized: %q", upstreamText)
+	}
+	if traces := tenantGateway.Traces().GetAll(); len(traces) != 1 || traces[0].SanitizedPrompt != "" {
+		t.Fatalf("tenant plaintext-capable policy must suppress persisted prompts: %+v", traces)
+	}
+	if upstreamText := send(tenantGateway, "global-key"); strings.Contains(upstreamText, rawCPF) {
+		t.Fatalf("tenant disable leaked into global policy: %q", upstreamText)
+	}
+}
+
+func TestGateway_DisabledDLPActionAppliesToStreamingRequests(t *testing.T) {
+	const rawCPF = "529.982.247-25"
+	var upstreamText string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode streaming upstream request: %v", err)
+		}
+		messages := payload["messages"].([]interface{})
+		for _, rawMessage := range messages {
+			message := rawMessage.(map[string]interface{})
+			if message["role"] == "user" {
+				upstreamText, _ = message["content"].(string)
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	v := vault.NewMemoryVault(time.Minute)
+	defer v.Close()
+	engine := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+	traces := observability.NewTraceLogger(10)
+	defer traces.Close()
+	upstream := NewUpstreamDispatcher(UpstreamConfig{OpenAIBaseURL: server.URL, OpenAIKey: "upstream-key"})
+	gw := NewGatewayWithOptions(engine, upstream, traces, GatewayOptions{
+		GlobalProxyKey: "global-key",
+		EntityActions:  map[string]string{"CPF": "disabled"},
+	})
+
+	body := []byte(`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer global-key")
+	w := httptest.NewRecorder()
+	gw.HandleChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("streaming request failed: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(upstreamText, rawCPF) {
+		t.Fatalf("disabled CPF was anonymized in streaming request: %q", upstreamText)
+	}
+	if active := v.ActiveSessionsCount(); active != 0 {
+		t.Fatalf("streaming request vault was not purged: %d active sessions", active)
+	}
+}
+
 func TestGateway_PathAndKeyRouting(t *testing.T) {
 	base := newTestGateway("default-key", nil)
-	gw := NewGatewayWithOptions(base.engine, nil, "default-key", base.traces, GatewayOptions{
+	gw := NewGatewayWithOptions(base.engine, nil, base.traces, GatewayOptions{
 		MaxConcurrent:      4,
+		GlobalProxyKey:     "default-key",
 		TenantKeys:         map[string]string{"financeiro": "fin-secret"},
 		AllowLegacyURLKeys: true,
 		TenantEntityActions: map[string]map[string]string{
@@ -390,8 +553,9 @@ func TestGateway_PathAndKeyRouting(t *testing.T) {
 
 func TestGatewayTenantRateLimit(t *testing.T) {
 	base := newTestGateway("default-key", nil)
-	gw := NewGatewayWithOptions(base.engine, nil, "default-key", base.traces, GatewayOptions{
+	gw := NewGatewayWithOptions(base.engine, nil, base.traces, GatewayOptions{
 		MaxConcurrent:      4,
+		GlobalProxyKey:     "default-key",
 		RateLimitPerMinute: 1,
 	})
 	body := []byte(`{"model":"mock","messages":[{"role":"user","content":"olá"}]}`)
@@ -714,7 +878,8 @@ func TestGatewayWebhookOnBlock(t *testing.T) {
 	engine := anonymizer.NewEngine(anonymizer.DefaultConfig(), memVault)
 	traces := observability.NewTraceLogger(100)
 
-	gw := NewGatewayWithOptions(engine, nil, "admin-key", traces, GatewayOptions{
+	gw := NewGatewayWithOptions(engine, nil, traces, GatewayOptions{
+		GlobalProxyKey: "proxy-key",
 		EntityActions: map[string]string{
 			"API_KEY": "block",
 		},
@@ -723,7 +888,7 @@ func TestGatewayWebhookOnBlock(t *testing.T) {
 
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"Key sk-proj-1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	req.Header.Set("Authorization", "Bearer admin-key")
+	req.Header.Set("Authorization", "Bearer proxy-key")
 	w := httptest.NewRecorder()
 
 	gw.HandleChatCompletions(w, req)
@@ -756,7 +921,7 @@ func TestGateway_TenantPathAndPassthrough(t *testing.T) {
 		t.Fatalf("fingerprinting provider key: %v", err)
 	}
 
-	gw := NewGatewayWithOptions(engine, nil, "admin-secret-key", traces, GatewayOptions{
+	gw := NewGatewayWithOptions(engine, nil, traces, GatewayOptions{
 		GlobalProxyKey: "sec_HG_global_test_key",
 		EntityActions: map[string]string{
 			"CPF": "mask",
@@ -848,7 +1013,7 @@ func TestGateway_TenantPathRejectsUnregisteredProviderKey(t *testing.T) {
 	v := vault.NewMemoryVault(time.Minute)
 	t.Cleanup(v.Close)
 	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
-	gw := NewGatewayWithOptions(eng, nil, "admin-secret", nil, GatewayOptions{
+	gw := NewGatewayWithOptions(eng, nil, nil, GatewayOptions{
 		TenantKeys: map[string]string{"financeiro": "tenant-proxy-secret"},
 	})
 
@@ -879,7 +1044,7 @@ func TestGateway_TransparentProviderKeyFingerprint(t *testing.T) {
 	v := vault.NewMemoryVault(time.Minute)
 	t.Cleanup(v.Close)
 	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
-	gw := NewGatewayWithOptions(eng, nil, "admin-secret", nil, GatewayOptions{
+	gw := NewGatewayWithOptions(eng, nil, nil, GatewayOptions{
 		TenantEntityActions: map[string]map[string]string{
 			"financeiro": {"CPF": "block"},
 		},
@@ -904,7 +1069,7 @@ func TestGateway_RoutingRequestNeverForwardsHadesGateKey(t *testing.T) {
 	v := vault.NewMemoryVault(time.Minute)
 	t.Cleanup(v.Close)
 	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
-	gw := NewGatewayWithOptions(eng, nil, "admin-secret", nil, GatewayOptions{
+	gw := NewGatewayWithOptions(eng, nil, nil, GatewayOptions{
 		TenantKeys: map[string]string{"financeiro": "tenant-secret"},
 	})
 

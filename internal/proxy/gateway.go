@@ -42,7 +42,6 @@ type Gateway struct {
 	engine                    *anonymizer.Engine
 	upstream                  *UpstreamDispatcher
 	mock                      *MockLLM
-	adminKey                  string
 	globalProxyKey            string
 	traces                    *observability.TraceLogger
 	metrics                   MetricsTracker
@@ -118,16 +117,17 @@ func (l *tokenBucketLimiter) allow(now time.Time) bool {
 }
 
 // NewGateway creates an initialized Gateway instance.
-func NewGateway(engine *anonymizer.Engine, upstream *UpstreamDispatcher, adminKey string, traces *observability.TraceLogger) *Gateway {
-	return NewGatewayWithLimit(engine, upstream, adminKey, traces, 128)
+func NewGateway(engine *anonymizer.Engine, upstream *UpstreamDispatcher, proxyKey string, traces *observability.TraceLogger) *Gateway {
+	return NewGatewayWithLimit(engine, upstream, proxyKey, traces, 128)
 }
 
 // NewGatewayWithLimit creates a gateway with a fixed, allocation-free concurrency guard.
-func NewGatewayWithLimit(engine *anonymizer.Engine, upstream *UpstreamDispatcher, adminKey string, traces *observability.TraceLogger, maxConcurrent int) *Gateway {
-	return NewGatewayWithOptions(engine, upstream, adminKey, traces, GatewayOptions{MaxConcurrent: maxConcurrent})
+func NewGatewayWithLimit(engine *anonymizer.Engine, upstream *UpstreamDispatcher, proxyKey string, traces *observability.TraceLogger, maxConcurrent int) *Gateway {
+	return NewGatewayWithOptions(engine, upstream, traces, GatewayOptions{MaxConcurrent: maxConcurrent, GlobalProxyKey: proxyKey})
 }
 
-func NewGatewayWithOptions(engine *anonymizer.Engine, upstream *UpstreamDispatcher, adminKey string, traces *observability.TraceLogger, options GatewayOptions) *Gateway {
+// NewGatewayWithOptions creates a gateway using only proxy-scoped credentials from options.
+func NewGatewayWithOptions(engine *anonymizer.Engine, upstream *UpstreamDispatcher, traces *observability.TraceLogger, options GatewayOptions) *Gateway {
 	maxConcurrent := options.MaxConcurrent
 	if maxConcurrent <= 0 {
 		maxConcurrent = 128
@@ -137,7 +137,7 @@ func NewGatewayWithOptions(engine *anonymizer.Engine, upstream *UpstreamDispatch
 	}
 	tenantPolicies := make(map[string]*policy.Engine, len(options.TenantEntityActions))
 	for tenant, actions := range options.TenantEntityActions {
-		tenantPolicies[tenant] = policy.New(actions).WithFamilyResolver(familyResolver)
+		tenantPolicies[tenant] = policy.New(mergeEntityActions(options.EntityActions, actions)).WithFamilyResolver(familyResolver)
 	}
 	rateLimiters := make(map[string]*tokenBucketLimiter, len(options.TenantRateLimits)+1)
 	if options.RateLimitPerMinute > 0 {
@@ -152,7 +152,6 @@ func NewGatewayWithOptions(engine *anonymizer.Engine, upstream *UpstreamDispatch
 		engine:                    engine,
 		upstream:                  upstream,
 		mock:                      NewMockLLM(),
-		adminKey:                  adminKey,
 		globalProxyKey:            options.GlobalProxyKey,
 		traces:                    traces,
 		requestSlots:              make(chan struct{}, maxConcurrent),
@@ -206,7 +205,7 @@ func (g *Gateway) Metrics() MetricsTracker {
 	}
 }
 
-// authenticate validates the request credentials against adminKey.
+// authenticate validates request credentials against proxy-scoped keys only.
 func (g *Gateway) authenticate(r *http.Request) bool {
 	_, ok := g.authenticateTenant(r)
 	return ok
@@ -236,6 +235,12 @@ func (g *Gateway) isGlobalKeyValid(key string) bool {
 	return false
 }
 
+func (g *Gateway) proxyAuthRequired() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.globalProxyKey != "" || len(g.tenantKeys) > 0 || len(g.providerKeyFingerprints) > 0
+}
+
 func (g *Gateway) authenticateTenant(r *http.Request) (string, bool) {
 	// 0. Pre-authenticated routes (via secret key embedded in /p/{key}/ or /t/{proxy_key}/)
 	if isPreAuth, _ := r.Context().Value(preAuthCtxKey{}).(bool); isPreAuth {
@@ -257,14 +262,14 @@ func (g *Gateway) authenticateTenant(r *http.Request) (string, bool) {
 		}
 	}
 
-	if g.adminKey == "" && g.globalProxyKey == "" {
+	if !g.proxyAuthRequired() {
 		if pathTenant != "" {
 			return pathTenant, true
 		}
 		return "default", true
 	}
 
-	// 1. Tenta autenticar contra a globalProxyKey, adminKey ou chaves de proxy dos tenants
+	// 1. Authenticate only against the global proxy key or tenant proxy keys.
 	for _, key := range gatewayKeys {
 		if tenant, ok := g.AuthenticateKey(key); ok {
 			if pathTenant != "" {
@@ -366,24 +371,19 @@ func (g *Gateway) UpdateProviderKeyFingerprints(secret string, fingerprints map[
 	g.providerKeyFingerprints = cloneFingerprintMap(fingerprints)
 }
 
-// AuthenticateKey verifies if key matches global proxy key, admin key, or any registered tenant proxy key.
+// AuthenticateKey verifies if key matches the global proxy key or a tenant proxy key.
 func (g *Gateway) AuthenticateKey(key string) (string, bool) {
 	if key == "" {
 		return "", false
 	}
 	g.mu.RLock()
 	globalProxyKey := g.globalProxyKey
-	adminKey := g.adminKey
 	tenantKeys := g.tenantKeys
 	g.mu.RUnlock()
 
 	if globalProxyKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(globalProxyKey)) == 1 {
 		return "default", true
 	}
-	if adminKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(adminKey)) == 1 {
-		return "default", true
-	}
-
 	for tenant, tenantKey := range tenantKeys {
 		if subtle.ConstantTimeCompare([]byte(key), []byte(tenantKey)) == 1 {
 			return tenant, true
@@ -531,6 +531,36 @@ func (g *Gateway) policyForTenant(tenant string) *policy.Engine {
 	return g.PolicyForTenant(tenant)
 }
 
+func (g *Gateway) anonymizeWithPolicy(sessionID, text string, tenantPolicy *policy.Engine) anonymizer.Result {
+	return g.engine.AnonymizeWithOptions(sessionID, text, anonymizer.AnonymizeOptions{
+		IsTypeDisabled: func(entityType detector.EntityType) bool {
+			return tenantPolicy.IsDisabled(string(entityType))
+		},
+	})
+}
+
+func telemetryPromptForPolicy(tenantPolicy *policy.Engine, sanitizedPrompt string) string {
+	if tenantPolicy.HasDisabledActions() {
+		return ""
+	}
+	return sanitizedPrompt
+}
+
+func mergeEntityActions(global, tenant map[string]string) map[string]string {
+	merged := make(map[string]string, len(global)+len(tenant))
+	for entityType, action := range global {
+		merged[entityType] = action
+	}
+	for entityType, action := range tenant {
+		normalized := strings.ToLower(strings.TrimSpace(action))
+		if normalized == "" || normalized == "inherit" {
+			continue
+		}
+		merged[entityType] = normalized
+	}
+	return merged
+}
+
 func (g *Gateway) allowTenantRequest(tenant string) bool {
 	g.mu.RLock()
 	limiter := g.rateLimiters[tenant]
@@ -558,7 +588,7 @@ func (g *Gateway) UpdateDynamicConfig(entityActions map[string]string, tenantKey
 
 	compiledTenantPolicies := make(map[string]*policy.Engine, len(tenantPolicies))
 	for tenant, actions := range tenantPolicies {
-		compiledTenantPolicies[tenant] = policy.New(actions).WithFamilyResolver(familyResolver)
+		compiledTenantPolicies[tenant] = policy.New(mergeEntityActions(entityActions, actions)).WithFamilyResolver(familyResolver)
 	}
 	g.tenantPolicies = compiledTenantPolicies
 
@@ -591,9 +621,9 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	start := time.Now()
 	atomic.AddUint64(&g.metrics.TotalRequests, 1)
 
-	// 1. Authenticate if AdminKey is set
+	// 1. Authenticate using proxy-scoped credentials only.
 	tenant, authenticated := g.authenticateTenant(r)
-	if g.adminKey != "" && !authenticated {
+	if g.proxyAuthRequired() && !authenticated {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":{"message":"Invalid or missing API key","type":"auth_error"}}`))
@@ -650,6 +680,7 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("X-HadesGate-Request-ID", sessionID)
 	defer g.engine.Vault().DeleteSession(sessionID)
+	tenantPolicy := g.PolicyForTenant(tenant)
 
 	// 4. Anonymize messages in the payload
 	modelName, _ := rawPayload["model"].(string)
@@ -676,7 +707,7 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		if role == "user" && content != "" {
 			detectedLang = observability.DetectLanguage(content)
 		}
-		anonResult := g.engine.Anonymize(sessionID, content)
+		anonResult := g.anonymizeWithPolicy(sessionID, content, tenantPolicy)
 		totalEntitiesMasked += len(anonResult.Entities)
 		collectedEntities = append(collectedEntities, anonResult.Entities...)
 		for k, v := range anonResult.TokenMap {
@@ -696,7 +727,7 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	atomic.AddUint64(&g.metrics.EntitiesMasked, uint64(totalEntitiesMasked))
 
 	detectedTypes, piiTypes, secretTypes := observability.ClassifyEntities(collectedEntities)
-	decision := g.policyForTenant(tenant).Decide(detectedTypes)
+	decision := tenantPolicy.Decide(detectedTypes)
 	w.Header().Set("X-HadesGate-Policy-Action", string(decision.Action))
 
 	statusCode := http.StatusOK
@@ -722,7 +753,7 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 				EntityTypes:     detectedTypes,
 				PIITypes:        piiTypes,
 				SecretTypes:     secretTypes,
-				SanitizedPrompt: lastUserPrompt,
+				SanitizedPrompt: telemetryPromptForPolicy(tenantPolicy, lastUserPrompt),
 			})
 		}
 	}()
@@ -889,7 +920,7 @@ func (g *Gateway) sendMockNonStreamingResponse(w http.ResponseWriter, reqID, mod
 
 // HandleModels returns available models, querying upstream router if configured.
 func (g *Gateway) HandleModels(w http.ResponseWriter, r *http.Request) {
-	if g.adminKey != "" && !g.authenticate(r) {
+	if g.proxyAuthRequired() && !g.authenticate(r) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":{"message":"Invalid or missing API key","type":"auth_error"}}`))

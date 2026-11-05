@@ -25,7 +25,14 @@ export default function Home() {
   const [systemNotif, setSystemNotif] = useState<SystemNotification | null>(null);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      if (typeof window === "undefined") {
+        if (!cancelled) setIsCheckingAuth(false);
+        return;
+      }
+
       // 1. Load Language (default PT-BR)
       const savedLang = localStorage.getItem("hadesgate_lang") as Language | null;
       if (savedLang === "en" || savedLang === "pt-BR") {
@@ -38,7 +45,7 @@ export default function Home() {
       setTheme(resolvedTheme);
       document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
 
-      // 2. Load Auth (supports hadesgate_* with fallback to legacy privagate_*)
+      // 3. Revalidate the saved admin session instead of trusting browser state.
       const storedAuth =
         sessionStorage.getItem("hadesgate_auth") ||
         sessionStorage.getItem("privagate_auth");
@@ -55,23 +62,49 @@ export default function Home() {
       }
 
       setGatewayUrl(storedUrl || initialUrl);
-      if (storedKey) setApiKey(storedKey);
-
-      if (
+      const hasStoredSession =
         storedAuth === "true" &&
         storedKey &&
         storedKey.trim().length > 0 &&
         storedUrl &&
-        storedUrl.trim().length > 0
-      ) {
+        storedUrl.trim().length > 0;
+
+      let validAdminSession = false;
+      if (hasStoredSession) {
+        try {
+          const response = await fetch(`${storedUrl.replace(/\/$/, "")}/api/auth/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key: storedKey.trim() }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            validAdminSession = data.valid === true;
+          }
+        } catch {
+          validAdminSession = false;
+        }
+      }
+
+      if (cancelled) return;
+      if (validAdminSession && storedKey) {
+        setApiKey(storedKey);
         setIsAuthenticated(true);
       } else {
+        setApiKey("");
         setIsAuthenticated(false);
         sessionStorage.removeItem("hadesgate_auth");
         sessionStorage.removeItem("hadesgate_key");
+        sessionStorage.removeItem("privagate_auth");
+        sessionStorage.removeItem("privagate_key");
       }
-    }
-    setIsCheckingAuth(false);
+      setIsCheckingAuth(false);
+    };
+
+    void restoreSession();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleToggleTheme = () => {

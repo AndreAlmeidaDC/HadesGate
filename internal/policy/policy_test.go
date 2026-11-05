@@ -30,3 +30,34 @@ func TestDecision_FamilyResolverFallback(t *testing.T) {
 		t.Fatalf("expected SUS_CARD in decision types, got %v", decision.Types)
 	}
 }
+
+func TestDisabledActionUsesEntityAndFamilyResolution(t *testing.T) {
+	engine := New(map[string]string{
+		"CPF":      "disabled",
+		"PERSONAL": "disabled",
+		"EMAIL":    "mask",
+	}).WithFamilyResolver(func(entityType string) string {
+		if entityType == "PERSON" || entityType == "PHONE" {
+			return "PERSONAL"
+		}
+		return ""
+	})
+
+	if !engine.IsDisabled("cpf") {
+		t.Fatal("expected entity-level CPF disable to be effective")
+	}
+	if !engine.IsDisabled("PERSON") {
+		t.Fatal("expected PERSONAL family disable to apply to PERSON")
+	}
+	if engine.IsDisabled("EMAIL") {
+		t.Fatal("explicit EMAIL mask must override a family/default disable")
+	}
+	if !engine.HasDisabledActions() {
+		t.Fatal("expected policy to report configured disabled actions")
+	}
+
+	decision := engine.Decide([]string{"CPF", "PERSON", "EMAIL"})
+	if decision.Action != Mask || len(decision.Types) != 0 {
+		t.Fatalf("disabled entities must not participate in policy decisions: %+v", decision)
+	}
+}

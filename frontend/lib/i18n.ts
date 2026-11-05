@@ -132,11 +132,14 @@ export interface Translations {
     mask: string;
     block: string;
     routeLocal: string;
+    disabled: string;
+    disabledWarning: string;
     allFamilies: string;
     familyBatchAction: string;
     setAllMask: string;
     setAllBlock: string;
     setAllRouteLocal: string;
+    setAllDisabled: string;
     familyConfidence: string;
     applyToAllInGroup: string;
     customThreshold: string;
@@ -293,11 +296,14 @@ export const translations: Record<Language, Translations> = {
       mask: "MASCARAR (MASK)",
       block: "BLOQUEAR (BLOCK)",
       routeLocal: "ROTEAR LOCAL",
+      disabled: "DESATIVAR DLP",
+      disabledWarning: "ATENÇÃO: DESATIVAR ignora detecção, tokenização, métricas e bloqueio. Dados dessa categoria podem seguir em texto puro ao provedor.",
       allFamilies: "TODAS AS FAMÍLIAS",
       familyBatchAction: "AÇÕES EM LOTE",
       setAllMask: "TODOS MASK",
       setAllBlock: "TODOS BLOCK",
       setAllRouteLocal: "TODOS LOCAL",
+      setAllDisabled: "TODOS SEM DLP",
       familyConfidence: "CONFIANÇA MÍNIMA (PESO DO LOTE)",
       applyToAllInGroup: "APLICAR A TODAS DO GRUPO",
       customThreshold: "SCORE MÍNIMO",
@@ -452,11 +458,14 @@ export const translations: Record<Language, Translations> = {
       mask: "MASK",
       block: "BLOCK",
       routeLocal: "ROUTE LOCAL",
+      disabled: "DISABLE DLP",
+      disabledWarning: "WARNING: DISABLE skips detection, tokenization, metrics, and blocking. Data in this category may reach the provider as plaintext.",
       allFamilies: "ALL FAMILIES",
       familyBatchAction: "BATCH ACTIONS",
       setAllMask: "ALL MASK",
       setAllBlock: "ALL BLOCK",
       setAllRouteLocal: "ALL LOCAL",
+      setAllDisabled: "ALL NO DLP",
       familyConfidence: "MIN CONFIDENCE (BATCH WEIGHT)",
       applyToAllInGroup: "APPLY TO ALL IN GROUP",
       customThreshold: "MIN SCORE",

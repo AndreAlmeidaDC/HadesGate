@@ -65,7 +65,7 @@ Tudo isso num **binário Go estático**, sem Python, sem modelo de NLP pesado e 
 | 🔐 **Tokens imprevisíveis** | Namespace aleatório (`crypto/rand`) por requisição — impossível correlacionar conversas. |
 | 🧠 **Deduplicação canônica** | `529.982.247-25` e `52998224725` viram o **mesmo** token, preservando o raciocínio do LLM. |
 | 🗄️ **Telemetria Zero-PII** | SQLite em Go puro guarda só métricas e o prompt já mascarado. Nunca o dado real. |
-| 🎛️ **Políticas por entidade** | `mask`, `block` ou `route_local` por tipo de dado e por tenant. |
+| 🎛️ **Políticas por entidade** | `mask`, `block`, `route_local` ou `disabled` por tipo de dado e por tenant. |
 | 🖥️ **Dashboard embutido** | Console em estilo *Industrial Brutalism*, dark mode padrão, PT-BR/EN, servido pelo próprio binário. |
 
 ---
@@ -123,6 +123,7 @@ docker compose up -d --build
 docker build -t hadesgate:latest .
 docker run -d --name hadesgate -p 8080:8080 \
   -v hadesgate_data:/app/data \
+  -e HADESGATE_BIND_ADDRESS=0.0.0.0 \
   -e HADESGATE_ADMIN_KEY=troque_esta_chave \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   hadesgate:latest
@@ -131,7 +132,7 @@ docker run -d --name hadesgate -p 8080:8080 \
 ### A partir do código-fonte
 
 ```bash
-# Requer Go 1.26+ e Node 20+
+# Requer Go 1.27.3+ e Node 20+
 cd frontend && npm install && npm run build && cd ..
 # copie frontend/out para internal/web/dist (veja o Makefile)
 CGO_ENABLED=0 go build -o hadesgate ./cmd/hadesgate
@@ -336,6 +337,7 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 
 | Variável | Padrão | Descrição |
 |---|---|---|
+| `HADESGATE_BIND_ADDRESS` | `127.0.0.1` | Interface HTTP; use `0.0.0.0` somente em container/rede protegida |
 | `PORT` | `8080` | Porta HTTP |
 | `HADESGATE_ADMIN_KEY` | *gerada* | Chave do dashboard e da API |
 | `HADESGATE_PROXY_KEY` | *gerada separadamente* | Chave opcional para clientes gerenciados; nunca concede acesso administrativo |
@@ -350,10 +352,13 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Upstream Google Gemini |
 | `GEMINI_API_KEY` | — | Chave do upstream Google Gemini (ou `GOOGLE_API_KEY`) |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434/v1` | Endpoint local (também usado por `route_local`) |
-| `HADESGATE_ENTITY_ACTIONS` | `mask` | Ex.: `CREDIT_CARD:block,API_KEY:mask` |
+| `HADESGATE_ENTITY_ACTIONS` | `mask` | Ex.: `CREDIT_CARD:block,API_KEY:mask,VEHICLE:disabled` |
+| `HADESGATE_TENANT_ENTITY_ACTIONS` | — | Overrides por tenant; ex.: `analytics|VEHICLE:disabled;financeiro|CPF:block` |
 | `HADESGATE_TENANT_PROXY_KEYS` | — | Chaves por tenant (`tenant:chave`) |
 | `HADESGATE_ALLOW_DYNAMIC_UPSTREAM` | `false` | Habilita o header `X-Upstream-Url` |
 | `HADESGATE_DYNAMIC_UPSTREAM_ALLOWED_HOSTS` | — | Allowlist exata `host:porta` |
+| `HADESGATE_ALLOW_PRIVATE_DYNAMIC_UPSTREAM` | `false` | Permite que entradas dinâmicas já allowlisted resolvam para loopback/RFC1918 |
+| `HADESGATE_PRIVATE_UPSTREAM_ALLOWED_HOSTS` | — | Autoriza hosts privados configurados, preferencialmente com porta exata |
 | `HADESGATE_MAX_CONCURRENT_REQUESTS` | `128` | Limite de concorrência (excedente → 429) |
 | `VAULT_TTL` | `10m` | TTL de segurança do vault em RAM |
 | `HADESGATE_DB_PATH` | `./data/hadesgate.db` | Arquivo SQLite da telemetria |
@@ -361,6 +366,22 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 | `SEMANTIC_DETECTOR_ENABLED` | `false` | Sidecar semântico opcional |
 
 > Variáveis legadas `PRIVAGATE_*` continuam aceitas como fallback.
+
+> [!CAUTION]
+> A ação `disabled` desliga o DLP para a entidade ou macro-família selecionada: o valor não é detectado, tokenizado, contabilizado nem bloqueado e pode seguir em texto puro ao provedor. Use somente quando esse comportamento for intencional. Uma regra específica do tenant pode sobrescrever a global; `inherit` mantém a regra global. Para preservar o Zero-PII, a telemetria não persiste o prompt sanitizado enquanto a política efetiva tiver qualquer ação `disabled`.
+
+Upstreams dinâmicos passam por resolução DNS/IP em cada nova conexão e o socket é aberto diretamente no IP validado, evitando DNS rebinding. Endereços link-local, metadata, multicast, não especificados e faixas reservadas permanecem bloqueados mesmo com opt-in para redes privadas. Redirecionamentos HTTP de upstream são rejeitados.
+
+### Escopo das credenciais
+
+| Credencial | Escopo permitido |
+|---|---|
+| `HADESGATE_ADMIN_KEY` | Login do Console, Playground, traces, vault e APIs administrativas `/api/*` |
+| `HADESGATE_PROXY_KEY` | Requisições aos endpoints de IA; não autentica o Console |
+| Chave de proxy do tenant | Requisições de IA identificadas pelo tenant; não autentica o Console |
+| Chave BYOK do provedor | Proxy transparente após cadastro do fingerprint; não autentica o Console |
+
+O endpoint `/api/auth/verify` valida exclusivamente a chave administrativa. Sessões salvas no navegador são revalidadas no servidor a cada carregamento; um valor manipulado no `sessionStorage` não concede acesso às APIs.
 
 ---
 
@@ -378,7 +399,7 @@ hadesgate/
 │   ├── stream/             # Detokenizador SSE com janela deslizante
 │   ├── protocol/           # Extratores OpenAI / Responses / Anthropic
 │   ├── proxy/              # Gateway, upstreams, auth e limites
-│   ├── policy/             # Ações mask / block / route_local
+│   ├── policy/             # Ações mask / block / route_local / disabled
 │   ├── observability/      # Telemetria SQLite Zero-PII
 │   ├── config/             # Variáveis de ambiente
 │   └── web/                # API do dashboard + frontend embutido

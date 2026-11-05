@@ -49,6 +49,36 @@ func TestAnonymizer_FullEndToEnd(t *testing.T) {
 	}
 }
 
+func TestAnonymizer_DisabledTypePassesThroughWithoutVaultOrMetrics(t *testing.T) {
+	v := vault.NewMemoryVault(5 * time.Minute)
+	defer v.Close()
+	engine := NewEngine(DefaultConfig(), v)
+
+	const sessionID = "sess-disabled-cpf"
+	const rawCPF = "529.982.247-25"
+	const rawEmail = "joao.silva@empresa.com.br"
+	result := engine.AnonymizeWithOptions(sessionID, "CPF "+rawCPF+" email "+rawEmail, AnonymizeOptions{
+		IsTypeDisabled: func(entityType detector.EntityType) bool {
+			return entityType == detector.EntityType("CPF")
+		},
+	})
+
+	if !strings.Contains(result.SanitizedText, rawCPF) {
+		t.Fatalf("disabled CPF should pass through unchanged: %q", result.SanitizedText)
+	}
+	if strings.Contains(result.SanitizedText, rawEmail) {
+		t.Fatalf("enabled email should still be tokenized: %q", result.SanitizedText)
+	}
+	for _, entity := range result.Entities {
+		if entity.Type == detector.EntityType("CPF") {
+			t.Fatalf("disabled CPF must not be reported as detected: %+v", result.Entities)
+		}
+	}
+	if len(v.GetAllSessionMappings(sessionID)) != 1 {
+		t.Fatalf("vault should contain only the enabled email token: %+v", v.GetAllSessionMappings(sessionID))
+	}
+}
+
 func TestAnonymizer_NewBrazilianDetectors(t *testing.T) {
 	v := vault.NewMemoryVault(5 * time.Minute)
 	defer v.Close()

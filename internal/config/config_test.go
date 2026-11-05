@@ -52,3 +52,33 @@ func TestLoadSeparatesAdminProxyAndLoadsBYOKSecurity(t *testing.T) {
 		t.Fatal("expected legacy URL flag to load from environment")
 	}
 }
+
+func TestLoadNetworkSecurityDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("HADESGATE_ADMIN_KEY", "network-test-admin")
+	t.Setenv("HADESGATE_BIND_ADDRESS", "")
+	t.Setenv("HADESGATE_ALLOW_PRIVATE_DYNAMIC_UPSTREAM", "")
+	t.Setenv("HADESGATE_PRIVATE_UPSTREAM_ALLOWED_HOSTS", "")
+
+	cfg := Load()
+	if cfg.BindAddress != "127.0.0.1" {
+		t.Fatalf("expected loopback bind by default, got %q", cfg.BindAddress)
+	}
+	if cfg.AllowPrivateDynamicUpstream {
+		t.Fatal("private dynamic upstreams must be disabled by default")
+	}
+	t.Setenv("HADESGATE_BIND_ADDRESS", "   ")
+	if got := Load().BindAddress; got != "127.0.0.1" {
+		t.Fatalf("blank bind address must not expose all interfaces, got %q", got)
+	}
+
+	t.Setenv("HADESGATE_BIND_ADDRESS", "0.0.0.0")
+	t.Setenv("HADESGATE_ALLOW_PRIVATE_DYNAMIC_UPSTREAM", "true")
+	t.Setenv("HADESGATE_PRIVATE_UPSTREAM_ALLOWED_HOSTS", "router.internal:20128,10.0.0.8:8080")
+	cfg = Load()
+	if cfg.BindAddress != "0.0.0.0" || !cfg.AllowPrivateDynamicUpstream {
+		t.Fatalf("network overrides were not loaded: bind=%q private=%v", cfg.BindAddress, cfg.AllowPrivateDynamicUpstream)
+	}
+	if len(cfg.PrivateUpstreamAllowedHosts) != 2 {
+		t.Fatalf("expected two private upstream allowlist entries, got %v", cfg.PrivateUpstreamAllowedHosts)
+	}
+}

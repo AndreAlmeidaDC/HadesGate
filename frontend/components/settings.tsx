@@ -825,6 +825,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             </span>
           </div>
 
+          <div className="border-2 border-red-700 bg-red-950/20 p-3 font-mono text-[11px] font-bold uppercase text-red-300">
+            {t.settings.disabledWarning}
+          </div>
+
           {/* Family Filters Bar */}
           <div className="flex flex-wrap items-center gap-1.5 p-2 bg-secondary/50 border border-border">
             <span className="font-mono text-[10px] uppercase font-bold text-muted-foreground mr-1">
@@ -920,6 +924,14 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                           className="px-2 h-6 border border-amber-600 bg-amber-700/20 hover:bg-amber-700 text-amber-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
                         >
                           {t.settings.setAllRouteLocal}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleFamilyBatchAction(fam.id, "disabled")}
+                          className="px-2 h-6 border border-red-500 bg-red-950/30 hover:bg-red-700 text-red-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                          title={t.settings.disabledWarning}
+                        >
+                          {t.settings.setAllDisabled}
                         </button>
                       </div>
 
@@ -1030,6 +1042,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                                     { id: "mask", label: t.settings.mask },
                                     { id: "block", label: t.settings.block },
                                     { id: "route_local", label: t.settings.routeLocal },
+                                    { id: "disabled", label: t.settings.disabled },
                                   ].map((act) => {
                                     const isSelected = currentAction === act.id;
                                     let btnStyle = "border-border bg-secondary text-muted-foreground";
@@ -1040,6 +1053,8 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                                         btnStyle = "border-red-600 bg-red-700 text-white font-bold";
                                       } else if (act.id === "route_local") {
                                         btnStyle = "border-amber-600 bg-amber-700 text-white font-bold";
+                                      } else if (act.id === "disabled") {
+                                        btnStyle = "border-red-400 bg-red-950 text-red-200 font-bold";
                                       }
                                     }
                                     return (
@@ -1538,6 +1553,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                   </button>
                 </div>
 
+                <div className="border-2 border-red-700 bg-red-950/20 p-2.5 font-mono text-[10px] font-bold uppercase text-red-300">
+                  {t.settings.disabledWarning}
+                </div>
+
                 <div className="overflow-x-auto max-h-80 overflow-y-auto space-y-4">
                   {MACRO_FAMILIES.map((fam) => {
                     const entitiesInFamily = KNOWN_ENTITIES.filter((e) => e.family === fam.id);
@@ -1556,28 +1575,36 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "inherit")}
                               className="px-1.5 h-5 border border-border bg-secondary text-[9px] font-mono uppercase text-muted-foreground hover:text-foreground"
                             >
-                              HERDAR
+                              {t.settings.inheritGlobal}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "mask")}
                               className="px-1.5 h-5 border border-purple-600/50 bg-purple-700/20 text-[9px] font-mono uppercase text-purple-300 hover:text-white"
                             >
-                              MASCARAR
+                              {t.settings.mask}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "block")}
                               className="px-1.5 h-5 border border-red-600/50 bg-red-700/20 text-[9px] font-mono uppercase text-red-300 hover:text-white"
                             >
-                              BLOQUEAR
+                              {t.settings.block}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "route_local")}
                               className="px-1.5 h-5 border border-amber-600/50 bg-amber-700/20 text-[9px] font-mono uppercase text-amber-300 hover:text-white"
                             >
-                              ROTEAR
+                              {t.settings.routeLocal}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleTenantFamilyBatchAction(fam.id, "disabled")}
+                              className="px-1.5 h-5 border border-red-500 bg-red-950/30 text-[9px] font-mono uppercase text-red-300 hover:text-white"
+                              title={t.settings.disabledWarning}
+                            >
+                              {t.settings.setAllDisabled}
                             </button>
                           </div>
                         </div>
@@ -1599,19 +1626,22 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                                   <td className="py-1.5 px-2 whitespace-nowrap">
                                     <span className="px-1.5 py-0.5 border border-border bg-secondary text-[9px] font-mono uppercase text-muted-foreground whitespace-nowrap">
                                       {globalAction === "block"
-                                        ? "BLOQUEAR"
+                                        ? t.settings.block
                                         : globalAction === "route_local"
-                                        ? "ROTEAR LOCAL"
-                                        : "MASCARAR"}
+                                        ? t.settings.routeLocal
+                                        : globalAction === "disabled"
+                                        ? t.settings.disabled
+                                        : t.settings.mask}
                                     </span>
                                   </td>
                                   <td className="py-1.5 px-2 whitespace-nowrap">
                                     <div className="flex items-center gap-1 flex-nowrap">
                                       {[
-                                        { id: "inherit", label: "HERDAR" },
-                                        { id: "mask", label: "MASCARAR" },
-                                        { id: "block", label: "BLOQUEAR" },
-                                        { id: "route_local", label: "ROTEAR LOCAL" },
+                                        { id: "inherit", label: t.settings.inheritGlobal },
+                                        { id: "mask", label: t.settings.mask },
+                                        { id: "block", label: t.settings.block },
+                                        { id: "route_local", label: t.settings.routeLocal },
+                                        { id: "disabled", label: t.settings.disabled },
                                       ].map((act) => {
                                         const isSelected = tenantAction === act.id;
                                         let btnClass = "border-border bg-secondary text-muted-foreground";
@@ -1624,6 +1654,8 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                                             btnClass = "border-red-600 bg-red-700 text-white font-bold";
                                           } else if (act.id === "route_local") {
                                             btnClass = "border-amber-600 bg-amber-700 text-white font-bold";
+                                          } else if (act.id === "disabled") {
+                                            btnClass = "border-red-400 bg-red-950 text-red-200 font-bold";
                                           }
                                         }
 

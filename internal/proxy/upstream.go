@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,7 +33,9 @@ type UpstreamConfig struct {
 	AdminKey                    string
 	Timeout                     time.Duration
 	AllowDynamicUpstream        bool
+	AllowPrivateDynamicUpstream bool
 	DynamicUpstreamAllowedHosts []string
+	PrivateUpstreamAllowedHosts []string
 	MaxResponseBytes            int64
 	MaxSSEEventBytes            int
 	EnableEgressScan            bool
@@ -42,8 +45,10 @@ type UpstreamConfig struct {
 
 // UpstreamDispatcher routes and proxies requests to the appropriate upstream LLM.
 type UpstreamDispatcher struct {
-	cfg        UpstreamConfig
-	httpClient *http.Client
+	cfg                  UpstreamConfig
+	httpClient           *http.Client
+	lookupIP             lookupIPFunc
+	privateUpstreamHosts map[string]struct{}
 }
 
 // NewUpstreamDispatcher creates a new UpstreamDispatcher.
@@ -67,20 +72,25 @@ func NewUpstreamDispatcher(cfg UpstreamConfig) *UpstreamDispatcher {
 		cfg.MaxSSEEventBytes = 1 << 20
 	}
 
-	return &UpstreamDispatcher{
-		cfg: cfg,
-		httpClient: &http.Client{
-			Timeout: cfg.Timeout,
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 20,
-				IdleConnTimeout:     90 * time.Second,
-			},
+	dispatcher := &UpstreamDispatcher{
+		cfg:                  cfg,
+		lookupIP:             net.DefaultResolver.LookupIPAddr,
+		privateUpstreamHosts: privateUpstreamHostSet(cfg),
+	}
+	dispatcher.httpClient = &http.Client{
+		Timeout: cfg.Timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			DialContext:         dispatcher.dialContext,
+			ForceAttemptHTTP2:   true,
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
 		},
 	}
+	return dispatcher
 }
 
 // isMatchingAdminKey checks if the authorization token matches PrivaGate's admin key.
@@ -122,7 +132,7 @@ func (u *UpstreamDispatcher) ResolveTargetForEndpoint(r *http.Request, model, en
 
 	// 1. Check custom override header (e.g. X-Upstream-Url: http://localhost:20128/v1)
 	if custom := r.Header.Get("X-Upstream-Url"); custom != "" {
-		validated, validationErr := u.validateDynamicUpstream(custom)
+		validated, validationErr := u.validateDynamicUpstream(r.Context(), custom)
 		if validationErr != nil {
 			return "", "", false, validationErr
 		}
@@ -182,7 +192,7 @@ func (u *UpstreamDispatcher) ResolveTargetForEndpoint(r *http.Request, model, en
 	return baseURL, key, false, nil
 }
 
-func (u *UpstreamDispatcher) validateDynamicUpstream(raw string) (string, error) {
+func (u *UpstreamDispatcher) validateDynamicUpstream(ctx context.Context, raw string) (string, error) {
 	if !u.cfg.AllowDynamicUpstream {
 		return "", fmt.Errorf("dynamic upstream override is disabled")
 	}
@@ -204,6 +214,14 @@ func (u *UpstreamDispatcher) validateDynamicUpstream(raw string) (string, error)
 	targetHost := strings.ToLower(parsed.Host)
 	for _, allowed := range u.cfg.DynamicUpstreamAllowedHosts {
 		if strings.ToLower(strings.TrimSpace(allowed)) == targetHost {
+			addresses, resolveErr := u.resolveHost(ctx, parsed.Hostname())
+			if resolveErr != nil {
+				return "", fmt.Errorf("resolving dynamic upstream host: %w", resolveErr)
+			}
+			allowPrivate := u.cfg.AllowPrivateDynamicUpstream && u.isPrivateUpstreamAllowed(parsed.Hostname(), effectivePort(parsed))
+			if validationErr := validateResolvedAddresses(addresses, allowPrivate); validationErr != nil {
+				return "", validationErr
+			}
 			return parsed.String(), nil
 		}
 	}

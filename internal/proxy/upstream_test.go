@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -137,6 +138,9 @@ func TestResolveTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.name == "dynamic X-Upstream-Url and X-Upstream-Key override target" {
+				setOptionalBoolField(t, &tt.cfg, "AllowPrivateDynamicUpstream", true)
+			}
 			disp := NewUpstreamDispatcher(tt.cfg)
 			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 			for k, v := range tt.headers {
@@ -163,6 +167,42 @@ func TestResolveTarget(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestResolveTargetRejectsAllowlistedPrivateAddressByDefault(t *testing.T) {
+	dispatcher := NewUpstreamDispatcher(UpstreamConfig{
+		OpenAIKey:                   "default-key",
+		AllowDynamicUpstream:        true,
+		DynamicUpstreamAllowedHosts: []string{"169.254.169.254"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("X-Upstream-Url", "http://169.254.169.254/latest")
+
+	if _, _, _, err := dispatcher.ResolveTarget(req, "gpt-test"); err == nil {
+		t.Fatal("allowlisted link-local metadata address bypassed SSRF protection")
+	}
+}
+
+func TestResolveTargetRejectsAllowlistedLoopbackByDefault(t *testing.T) {
+	dispatcher := NewUpstreamDispatcher(UpstreamConfig{
+		OpenAIKey:                   "default-key",
+		AllowDynamicUpstream:        true,
+		DynamicUpstreamAllowedHosts: []string{"localhost:8443"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("X-Upstream-Url", "https://localhost:8443/v1")
+
+	if _, _, _, err := dispatcher.ResolveTarget(req, "gpt-test"); err == nil {
+		t.Fatal("allowlisted loopback host bypassed private-network opt-in")
+	}
+}
+
+func setOptionalBoolField(t *testing.T, target interface{}, name string, value bool) {
+	t.Helper()
+	field := reflect.ValueOf(target).Elem().FieldByName(name)
+	if field.IsValid() && field.CanSet() && field.Kind() == reflect.Bool {
+		field.SetBool(value)
 	}
 }
 

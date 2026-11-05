@@ -20,7 +20,7 @@ func (g *Gateway) HandleResponses(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	atomic.AddUint64(&g.metrics.TotalRequests, 1)
 	tenant, authenticated := g.authenticateTenant(r)
-	if g.adminKey != "" && !authenticated {
+	if g.proxyAuthRequired() && !authenticated {
 		writeProtocolError(w, http.StatusUnauthorized, "auth_error", "Invalid or missing API key")
 		return
 	}
@@ -57,6 +57,7 @@ func (g *Gateway) HandleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-HadesGate-Request-ID", requestID)
 	defer g.engine.Vault().DeleteSession(requestID)
+	tenantPolicy := g.PolicyForTenant(tenant)
 
 	model, _ := payload["model"].(string)
 	isStreaming, _ := payload["stream"].(bool)
@@ -76,7 +77,7 @@ func (g *Gateway) HandleResponses(w http.ResponseWriter, r *http.Request) {
 		if role == "user" && text != "" {
 			detectedLang = observability.DetectLanguage(text)
 		}
-		result := g.engine.Anonymize(requestID, text)
+		result := g.anonymizeWithPolicy(requestID, text, tenantPolicy)
 		entities += len(result.Entities)
 		collectedEntities = append(collectedEntities, result.Entities...)
 		if role == "user" {
@@ -105,11 +106,11 @@ func (g *Gateway) HandleResponses(w http.ResponseWriter, r *http.Request) {
 				StatusCode: statusCode, DurationMs: float64(time.Since(start).Microseconds()) / 1000,
 				AnonDurationUs: anonDurationUs, EntitiesCount: entities,
 				EntityTypes: entityTypes, PIITypes: piiTypes, SecretTypes: secretTypes,
-				SanitizedPrompt: sanitizedInput,
+				SanitizedPrompt: telemetryPromptForPolicy(tenantPolicy, sanitizedInput),
 			})
 		}
 	}()
-	decision := g.policyForTenant(tenant).Decide(entityTypes)
+	decision := tenantPolicy.Decide(entityTypes)
 	// The deferred trace reads the final policy through this response header.
 	w.Header().Set("X-HadesGate-Policy-Action", string(decision.Action))
 	if decision.Action == policy.Block {
@@ -160,7 +161,7 @@ func (g *Gateway) HandleAnthropicMessages(w http.ResponseWriter, r *http.Request
 	start := time.Now()
 	atomic.AddUint64(&g.metrics.TotalRequests, 1)
 	tenant, authenticated := g.authenticateTenant(r)
-	if g.adminKey != "" && !authenticated {
+	if g.proxyAuthRequired() && !authenticated {
 		writeProtocolError(w, http.StatusUnauthorized, "auth_error", "Invalid or missing API key")
 		return
 	}
@@ -196,6 +197,7 @@ func (g *Gateway) HandleAnthropicMessages(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("X-HadesGate-Request-ID", requestID)
 	defer g.engine.Vault().DeleteSession(requestID)
+	tenantPolicy := g.PolicyForTenant(tenant)
 
 	model, _ := payload["model"].(string)
 	isStreaming, _ := payload["stream"].(bool)
@@ -215,7 +217,7 @@ func (g *Gateway) HandleAnthropicMessages(w http.ResponseWriter, r *http.Request
 		if role == "user" && text != "" {
 			detectedLang = observability.DetectLanguage(text)
 		}
-		result := g.engine.Anonymize(requestID, text)
+		result := g.anonymizeWithPolicy(requestID, text, tenantPolicy)
 		entities += len(result.Entities)
 		collectedEntities = append(collectedEntities, result.Entities...)
 		if role == "user" {
@@ -242,11 +244,11 @@ func (g *Gateway) HandleAnthropicMessages(w http.ResponseWriter, r *http.Request
 				StatusCode: statusCode, DurationMs: float64(time.Since(start).Microseconds()) / 1000,
 				AnonDurationUs: anonDurationUs, EntitiesCount: entities,
 				EntityTypes: entityTypes, PIITypes: piiTypes, SecretTypes: secretTypes,
-				SanitizedPrompt: sanitizedInput,
+				SanitizedPrompt: telemetryPromptForPolicy(tenantPolicy, sanitizedInput),
 			})
 		}
 	}()
-	decision := g.policyForTenant(tenant).Decide(entityTypes)
+	decision := tenantPolicy.Decide(entityTypes)
 	w.Header().Set("X-HadesGate-Policy-Action", string(decision.Action))
 	if decision.Action == policy.Block {
 		statusCode = http.StatusBadRequest
@@ -306,7 +308,7 @@ func (g *Gateway) HandleGeminiModels(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	atomic.AddUint64(&g.metrics.TotalRequests, 1)
 	tenant, authenticated := g.authenticateTenant(r)
-	if g.adminKey != "" && !authenticated {
+	if g.proxyAuthRequired() && !authenticated {
 		writeProtocolError(w, http.StatusUnauthorized, "auth_error", "Invalid or missing API key")
 		return
 	}
@@ -343,6 +345,7 @@ func (g *Gateway) HandleGeminiModels(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-HadesGate-Request-ID", requestID)
 	defer g.engine.Vault().DeleteSession(requestID)
+	tenantPolicy := g.PolicyForTenant(tenant)
 
 	isStreaming := action == "streamGenerateContent"
 	isSSE := isStreaming && strings.EqualFold(r.URL.Query().Get("alt"), "sse")
@@ -363,7 +366,7 @@ func (g *Gateway) HandleGeminiModels(w http.ResponseWriter, r *http.Request) {
 		if role == "user" && text != "" {
 			detectedLang = observability.DetectLanguage(text)
 		}
-		result := g.engine.Anonymize(requestID, text)
+		result := g.anonymizeWithPolicy(requestID, text, tenantPolicy)
 		entities += len(result.Entities)
 		collectedEntities = append(collectedEntities, result.Entities...)
 		if role == "user" {
@@ -390,12 +393,12 @@ func (g *Gateway) HandleGeminiModels(w http.ResponseWriter, r *http.Request) {
 				StatusCode: statusCode, DurationMs: float64(time.Since(start).Microseconds()) / 1000,
 				AnonDurationUs: anonDurationUs, EntitiesCount: entities,
 				EntityTypes: entityTypes, PIITypes: piiTypes, SecretTypes: secretTypes,
-				SanitizedPrompt: sanitizedInput,
+				SanitizedPrompt: telemetryPromptForPolicy(tenantPolicy, sanitizedInput),
 			})
 		}
 	}()
 
-	decision := g.policyForTenant(tenant).Decide(entityTypes)
+	decision := tenantPolicy.Decide(entityTypes)
 	w.Header().Set("X-HadesGate-Policy-Action", string(decision.Action))
 	if decision.Action == policy.Block {
 		statusCode = http.StatusBadRequest
