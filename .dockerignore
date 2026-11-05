@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data
+.codex-gocache
+.codex-gopath
+.codex-gomodcache
+frontend/node_modules
+frontend/.next
+frontend/out
+bin
+dist
+*.exe
+*.log

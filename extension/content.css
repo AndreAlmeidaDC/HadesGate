@@ -1,0 +1,203 @@
+/* HadesGate™ Browser Shield — In-Page Tactical HUD & Toast (0px Radius) */
+
+#hadesgate-hud-root {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  pointer-events: none;
+}
+
+.hg-hud-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: stretch;
+  background: #121216;
+  color: #eaeaea;
+  border: 2px solid #3a3a4c;
+  border-left: 4px solid #9333ea;
+  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.65);
+  border-radius: 0px !important;
+  overflow: hidden;
+  user-select: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hg-hud-bar:hover {
+  border-color: #6366f1;
+  box-shadow: 5px 5px 0px rgba(0, 0, 0, 0.8);
+}
+
+/* Pill (Always visible in collapsed mode, clickable to toggle) */
+.hg-hud-pill {
+  display: flex;
+  align-items: stretch;
+  cursor: pointer;
+  background: #0d0d11;
+  transition: background 0.12s ease;
+}
+
+.hg-hud-pill:hover {
+  background: #1c1c26;
+}
+
+.hg-hud-logo {
+  padding: 0 8px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a855f7;
+  border-right: 1px solid #272734;
+  transition: color 0.12s ease;
+}
+
+.hg-hud-pill:hover .hg-hud-logo {
+  color: #c084fc;
+}
+
+.hg-hud-logo svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.hg-hud-counter {
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #a855f7;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transition: color 0.12s ease;
+}
+
+.hg-hud-counter.has-tokens {
+  color: #c084fc;
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+}
+
+.hg-hud-pill:hover .hg-hud-counter {
+  color: #e9d5ff;
+}
+
+.hg-hud-chevron {
+  padding: 6px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #71717a;
+  background: transparent;
+  border-left: 1px solid #272734;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s ease;
+}
+
+.hg-hud-pill:hover .hg-hud-chevron {
+  color: #a855f7;
+}
+
+/* Actions drawer (visible only when expanded) */
+.hg-hud-actions {
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid #3a3a4c;
+}
+
+.hg-hud-bar.hg-collapsed .hg-hud-actions {
+  display: none !important;
+}
+
+.hg-hud-bar.hg-expanded .hg-hud-actions {
+  display: flex !important;
+  animation: hg-hud-expand 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes hg-hud-expand {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.hg-hud-btn {
+  background: #181820;
+  color: #eaeaea;
+  border: none;
+  border-right: 1px solid #3a3a4c;
+  padding: 6px 10px;
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 0px !important;
+  transition: background 0.12s ease;
+  white-space: nowrap;
+}
+
+.hg-hud-btn:last-child {
+  border-right: none;
+}
+
+.hg-hud-btn.primary {
+  background: #9333ea;
+  color: #ffffff;
+}
+
+.hg-hud-btn.primary:hover {
+  background: #a855f7;
+}
+
+.hg-hud-btn:hover {
+  background: #272734;
+}
+
+.hg-hud-btn.hg-hud-close {
+  background: #121216;
+  color: #a1a1aa;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.hg-hud-btn.hg-hud-close:hover {
+  background: #272734;
+  color: #ffffff;
+}
+
+.hg-toast {
+  pointer-events: auto;
+  background: #121216;
+  color: #eaeaea;
+  border: 2px solid #9333ea;
+  padding: 7px 11px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.7);
+  border-radius: 0px !important;
+}
+
+.hg-toast.err {
+  border-color: #ff2a2a;
+  color: #ff2a2a;
+}
+

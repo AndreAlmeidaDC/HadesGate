@@ -1,0 +1,57 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+/hadesgate
+dist/
+
+# Embedded frontend build (keep .gitkeep so //go:embed all:dist always compiles)
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
+# Dev hot-reload & local runtime data
+.air/
+.air-docker/
+.devlogs/
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Test binary & coverage
+*.test
+*.out
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+
+# Local agent and tool caches
+.codex-gocache/
+.codex-gopath/
+.codex-npm-cache/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.log
+
+# Local scratch screenshots
+/dashboard.png
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo

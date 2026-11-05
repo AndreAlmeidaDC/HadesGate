@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light Substrate: Swiss Industrial Print + Industrial Purple */
+  :root {
+    --background: 42 15% 91%;        /* #EAE8E3 unbleached blueprint paper */
+    --foreground: 240 10% 4%;        /* #09090B carbon ink */
+    --card: 48 20% 95%;              /* #F5F4EF modular print cell */
+    --card-foreground: 240 10% 4%;
+    --popover: 48 20% 95%;
+    --popover-foreground: 240 10% 4%;
+    --primary: 272 72% 47%;          /* #7E22CE industrial purple */
+    --primary-foreground: 48 20% 97%;
+    --secondary: 42 12% 86%;
+    --secondary-foreground: 240 10% 6%;
+    --muted: 42 12% 86%;
+    --muted-foreground: 240 5% 34%;
+    --accent: 272 72% 47%;
+    --accent-foreground: 48 20% 97%;
+    --destructive: 0 84% 50%;        /* #EB1414 hazard red */
+    --destructive-foreground: 0 0% 98%;
+    --border: 40 10% 74%;            /* #C4C0B7 rigid grid line */
+    --frame: #111114;                /* Outer heavy architectural frame */
+    --input: 40 10% 74%;
+    --ring: 272 72% 47%;
+    --radius: 0rem;
+  }
+
+  /* Dark Substrate (DEFAULT): Tactical Telemetry & CRT Terminal + Purple */
+  .dark {
+    --background: 240 9% 4%;         /* #0A0A0C deactivated CRT obsidian */
+    --foreground: 0 0% 92%;          /* #EAEAEA white phosphor */
+    --card: 240 11% 7%;              /* #101014 tactical module cell */
+    --card-foreground: 0 0% 92%;
+    --popover: 240 11% 7%;
+    --popover-foreground: 0 0% 92%;
+    --primary: 271 81% 56%;          /* #9333EA electric industrial purple */
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 10% 11%;        /* #191920 */
+    --secondary-foreground: 0 0% 92%;
+    --muted: 240 10% 11%;
+    --muted-foreground: 240 6% 58%;  /* #8E8E9A telemetry gray */
+    --accent: 271 81% 56%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 100% 58%;       /* #FF2A2A hazard alert red */
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 11% 18%;           /* #292933 razor hairline */
+    --frame: #3D3D4E;
+    --input: 240 11% 18%;
+    --ring: 271 81% 56%;
+    --radius: 0rem;
+  }
+}
+
+* {
+  border-radius: 0px !important;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  position: relative;
+}
+
+/* Programmatic CRT Scanlines — active exclusively in Dark Tactical Telemetry mode */
+.dark .brutalist-scanlines {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.22) 2px,
+    rgba(0, 0, 0, 0.22) 4px
+  );
+}
+
+/* Industrial Warning / Structural Hatch Pattern */
+.brutalist-hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 6px,
+    rgba(147, 51, 234, 0.14) 6px,
+    rgba(147, 51, 234, 0.14) 12px
+  );
+}
+
+/* Rigid Mechanical Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+  border-left: 1px solid hsl(var(--border));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary));
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a855f7;
+}
+
+/* Hologram Scanning Beam and Tactical Grid */
+@keyframes hologram-sweep {
+  0% {
+    top: -10%;
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    top: 110%;
+    opacity: 0.2;
+  }
+}
+
+.animate-hologram-sweep {
+  animation: hologram-sweep 4s linear infinite;
+}
+
+.hologram-scanlines {
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(147, 51, 234, 0.15) 2px,
+    rgba(147, 51, 234, 0.15) 4px
+  );
+}
+
+.hologram-grid {
+  background-image: 
+    linear-gradient(to right, rgba(147, 51, 234, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(147, 51, 234, 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+}

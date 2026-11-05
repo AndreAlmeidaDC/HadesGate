@@ -1,0 +1,25 @@
+name: hadesgate-dev
+
+services:
+  hadesgate-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    working_dir: /src
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - HADESGATE_DB_PATH=/app/data/hadesgate-dev.db
+    volumes:
+      - .:/src
+      - go-mod:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+      - dev-data:/app/data
+
+volumes:
+  go-mod:
+  go-build:
+  dev-data:
+

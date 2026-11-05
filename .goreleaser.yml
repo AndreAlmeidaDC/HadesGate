@@ -1,0 +1,54 @@
+version: 2
+
+project_name: hadesgate
+
+before:
+  hooks:
+    - sh -c "cd frontend && npm ci && npm run build"
+
+builds:
+  - id: hadesgate
+    main: ./cmd/hadesgate
+    binary: hadesgate
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - .env.example
+
+checksum:
+  name_template: "SHA256SUMS"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - Merge pull request
+      - Merge branch
+

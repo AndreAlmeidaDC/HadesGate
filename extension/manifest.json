@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "HadesGate™ — Zero-PII AI Privacy Shield",
+  "short_name": "HadesGate",
+  "version": "2.0.0",
+  "description": "Escudo Zero-PII para ChatGPT, Claude, Gemini, Codex e Copilot. Mascara dados sensíveis via HadesGate antes de enviar à IA e restaura na tela.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "shield@hadesgate.dev",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "HadesGate™ // Zero-PII Shield",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*",
+        "https://chat.deepseek.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://grok.com/*",
+        "https://x.com/i/grok*",
+        "https://copilot.microsoft.com/*",
+        "https://github.com/copilot*"
+      ],
+      "css": ["content.css"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

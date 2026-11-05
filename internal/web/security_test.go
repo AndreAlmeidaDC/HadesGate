@@ -1,0 +1,131 @@
+package web
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestSecurityMiddleware_CORS(t *testing.T) {
+	dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"https://app.hadesgate.dev",
+		"chrome-extension://*",
+	}
+
+	handler := SecurityMiddleware(dummyHandler, allowedOrigins)
+
+	tests := []struct {
+		name          string
+		origin        string
+		method        string
+		wantAllow     bool
+		wantOriginVal string
+		wantPreflight bool
+	}{
+		{
+			name:          "Allowed Exact Origin",
+			origin:        "http://localhost:3000",
+			method:        http.MethodGet,
+			wantAllow:     true,
+			wantOriginVal: "http://localhost:3000",
+		},
+		{
+			name:          "Allowed Second Origin",
+			origin:        "https://app.hadesgate.dev",
+			method:        http.MethodPost,
+			wantAllow:     true,
+			wantOriginVal: "https://app.hadesgate.dev",
+		},
+		{
+			name:          "Allowed Chrome Extension Wildcard",
+			origin:        "chrome-extension://abcdefghijklmnop",
+			method:        http.MethodGet,
+			wantAllow:     true,
+			wantOriginVal: "chrome-extension://abcdefghijklmnop",
+		},
+		{
+			name:          "Disallowed Malicious Origin",
+			origin:        "https://evil-site.com",
+			method:        http.MethodGet,
+			wantAllow:     false,
+			wantOriginVal: "",
+		},
+		{
+			name:          "Preflight OPTIONS for Allowed Origin",
+			origin:        "http://localhost:3000",
+			method:        http.MethodOptions,
+			wantAllow:     true,
+			wantOriginVal: "http://localhost:3000",
+			wantPreflight: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "/v1/chat/completions", nil)
+			if tt.origin != "" {
+				req.Header.Set("Origin", tt.origin)
+			}
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			// Verify Security Headers
+			if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Errorf("expected X-Content-Type-Options: nosniff, got %q", got)
+			}
+			if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+				t.Errorf("expected X-Frame-Options: DENY, got %q", got)
+			}
+
+			// Verify CORS
+			gotOrigin := w.Header().Get("Access-Control-Allow-Origin")
+			if tt.wantAllow {
+				if gotOrigin != tt.wantOriginVal {
+					t.Errorf("expected Access-Control-Allow-Origin %q, got %q", tt.wantOriginVal, gotOrigin)
+				}
+			} else {
+				if gotOrigin != "" {
+					t.Errorf("expected empty Access-Control-Allow-Origin for rejected origin, got %q", gotOrigin)
+				}
+			}
+
+			if tt.wantPreflight && w.Code != http.StatusNoContent {
+				t.Errorf("expected 204 for OPTIONS, got %d", w.Code)
+			}
+		})
+	}
+}
+
+func TestSecurityMiddleware_DefaultDenyAndRejectsDisallowedPrivatePreflight(t *testing.T) {
+	called := false
+	handler := SecurityMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	}), nil)
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/config", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Private-Network", "true")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected disallowed preflight to be rejected, got %d", w.Code)
+	}
+	if called {
+		t.Fatal("disallowed preflight reached the protected handler")
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("default CORS policy allowed an origin: %q", got)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Private-Network"); got != "" {
+		t.Fatalf("private-network access was exposed to a rejected origin: %q", got)
+	}
+}
