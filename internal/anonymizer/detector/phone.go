@@ -51,6 +51,9 @@ func (d *PhoneDetector) Detect(text string) []Match {
 
 	indices := phoneRegex.FindAllStringIndex(text, -1)
 	for _, idx := range indices {
+		if embeddedInIdentifier(text, idx[0], idx[1]) {
+			continue
+		}
 		candidate := text[idx[0]:idx[1]]
 		if ValidatePhone(candidate) {
 			for k := idx[0]; k < idx[1]; k++ {
@@ -77,6 +80,9 @@ func (d *PhoneDetector) Detect(text string) []Match {
 	intlIndices := intlPhoneRegex.FindAllStringIndex(text, -1)
 	for _, idx := range intlIndices {
 		if claimed[idx[0]] {
+			continue
+		}
+		if embeddedInIdentifier(text, idx[0], idx[1]) {
 			continue
 		}
 		candidate := text[idx[0]:idx[1]]
@@ -140,6 +146,9 @@ func ValidatePhone(raw string) bool {
 	if strings.HasPrefix(digits, "55") && (len(digits) == 12 || len(digits) == 13) {
 		digits = digits[2:]
 	}
+	if allDigitsEqual(digits) {
+		return false
+	}
 
 	// 10 digits = DDD + 8 digit landline/old mobile
 	// 11 digits = DDD + 9 digit mobile (starting with 9)
@@ -163,4 +172,23 @@ func ValidatePhone(raw string) bool {
 	}
 
 	return false
+}
+
+func embeddedInIdentifier(text string, start, end int) bool {
+	isIdentifierByte := func(value byte) bool {
+		return value >= '0' && value <= '9' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value == '_'
+	}
+	return start > 0 && isIdentifierByte(text[start-1]) || end < len(text) && isIdentifierByte(text[end])
+}
+
+func allDigitsEqual(digits string) bool {
+	if len(digits) == 0 {
+		return false
+	}
+	for index := 1; index < len(digits); index++ {
+		if digits[index] != digits[0] {
+			return false
+		}
+	}
+	return true
 }

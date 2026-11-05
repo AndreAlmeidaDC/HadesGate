@@ -35,9 +35,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
   - Entidades desativadas deixam de participar da detecção, tokenização, vault, métricas e decisões `block`/`route_local`, preservando as demais proteções na mesma requisição.
   - A telemetria omite o conteúdo do prompt quando a política efetiva contém `disabled`, impedindo persistência acidental de plaintext no SQLite.
 - **Corpus de acurácia e gate por categoria**:
-  - Corpus ampliado de 41 para 115 cenários, incluindo 76 casos positivos, 39 controles negativos, textos multilíngues, múltiplas entidades, formatos compactos e colisões adversariais em 30 tipos.
+  - Corpus ampliado de 41 para 130 cenários, incluindo 77 casos positivos, 53 controles negativos, textos multilíngues, múltiplas entidades, formatos compactos e colisões adversariais em 30 tipos.
   - `pii-benchmark` agora valida integridade e cobertura mínima do corpus, apresenta falhas detalhadas e métricas por tipo, e exige precisão/recall ≥ 90% em cada categoria além do agregado.
   - Corrigidos falsos positivos de PIX em rótulos genéricos de chave privada, medicamento em nomes institucionais/IDs médicos e cartões sentinela com todos os dígitos repetidos.
+  - Adicionados testes metamórficos para sete detectores em diferentes contextos textuais e validação exaustiva do detokenizador em todos os pontos de corte do stream, incluindo chunks de um byte.
+  - Novos hard negatives corrigiram colisões de telefone dentro de UUID, telefones sentinela repetidos, localidades compostas classificadas como pessoa e termos comuns do catálogo farmacêutico.
 - **Fase 11 — Endurecimento de Segurança, DLP de Saída & Métricas Prometheus**:
   - Middleware de segurança e CORS estrito (`internal/web/security.go`) configurável via `HADESGATE_CORS_ALLOWED_ORIGINS` com suporte a extensões de navegador (`chrome-extension://*`) e headers de proteção OWASP (`nosniff`, `DENY`, `strict-origin-when-cross-origin`).
   - Rate Limiter contínuo Token Bucket (`internal/proxy/gateway.go`) com recarga fracionada temporal, substituindo o algoritmo de janela fixa e eliminando rajadas na virada de janela.

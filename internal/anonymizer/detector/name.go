@@ -43,6 +43,12 @@ var weakNamePrepositions = map[string]bool{
 	"para": true, "de": true, "do": true, "da": true, "com": true, "por": true, "ao": true,
 }
 
+// locationPrepositions are weak evidence for a place rather than a person when
+// no explicit person trigger or document apposition is present.
+var locationPrepositions = map[string]bool{
+	"em": true, "entre": true,
+}
+
 var connectorParticles = map[string]bool{
 	"da": true, "de": true, "do": true, "das": true, "dos": true, "e": true,
 }
@@ -372,6 +378,9 @@ func (d *NameDetector) evaluateCompoundGroup(text string, start, end int, tokens
 	}
 	hasRightDocCtx := rightDocAppositionRegex.MatchString(tailSlice)
 	hasStrongLeftTrig := leftTrig != "" && !weakNamePrepositions[leftTrig]
+	if locationPrepositions[prevWord] && !hasStrongLeftTrig && !hasRightDocCtx {
+		return Match{}, false
+	}
 
 	// Count substantive tokens and evaluate given/surname distribution and frequency evidence
 	substantiveCount := len(tokens)
@@ -515,12 +524,13 @@ func (d *NameDetector) evaluateCandidate(text, trigger string, rawStart, rawEnd 
 	}
 
 	// Reject if preceded immediately by a place, street, or institution prefix (e.g. "São Paulo", "Rua Rodolfo")
-	if prevWord := extractPreviousWordNorm(text, spans[0].start); prevWord != "" {
-		if blockingPrefixWords[prevWord] {
+	previousWord := extractPreviousWordNorm(text, spans[0].start)
+	if previousWord != "" {
+		if blockingPrefixWords[previousWord] {
 			return Match{}, false
 		}
-		if !fromCtx && leadingTriggerWords[prevWord] {
-			trigger = prevWord
+		if !fromCtx && leadingTriggerWords[previousWord] {
+			trigger = previousWord
 			fromCtx = true
 		}
 	}
@@ -617,6 +627,9 @@ func (d *NameDetector) evaluateCandidate(text, trigger string, rawStart, rawEnd 
 	hasRightDocCtx := rightDocAppositionRegex.MatchString(tailSlice)
 	isWeakTrig := weakNamePrepositions[trigger]
 	hasStrongLeftTrig := fromCtx && trigger != "" && !isWeakTrig
+	if locationPrepositions[previousWord] && !hasStrongLeftTrig && !hasRightDocCtx {
+		return Match{}, false
+	}
 
 	// Confidence scoring matrix combining bi-directional context, lexicon, and morphology
 	score := 0.0

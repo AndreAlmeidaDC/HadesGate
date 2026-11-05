@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -120,4 +121,42 @@ func TestStreamDetokenizer_ResilientLLMTokenMutations(t *testing.T) {
 	if got != expected {
 		t.Fatalf("Resilient detokenization mismatch!\nExpected: %q\nGot:      %q", expected, got)
 	}
+}
+
+func TestStreamDetokenizer_RestoresTokenAtEveryChunkBoundary(t *testing.T) {
+	v := vault.NewMemoryVault(5 * time.Minute)
+	defer v.Close()
+
+	const sessionID = "test-all-boundaries"
+	const token = "[HG_ab12cd34_PERSON_1]"
+	const plaintext = "João da Silva"
+	v.Put(sessionID, token, plaintext, "PERSON", 5*time.Minute)
+
+	assertChunks := func(t *testing.T, chunks []string) {
+		t.Helper()
+		detok := NewDetokenizer(sessionID, v)
+		var output strings.Builder
+		for _, chunk := range chunks {
+			output.WriteString(detok.Feed(chunk))
+		}
+		output.WriteString(detok.Flush())
+		if got, want := output.String(), "antes "+plaintext+" depois"; got != want {
+			t.Fatalf("chunks %q: got %q, want %q", chunks, got, want)
+		}
+	}
+
+	streamText := "antes " + token + " depois"
+	for cut := 1; cut < len(streamText); cut++ {
+		t.Run(fmt.Sprintf("cut-%d", cut), func(t *testing.T) {
+			assertChunks(t, []string{streamText[:cut], streamText[cut:]})
+		})
+	}
+
+	byteChunks := make([]string, 0, len(streamText))
+	for index := 0; index < len(streamText); index++ {
+		byteChunks = append(byteChunks, streamText[index:index+1])
+	}
+	t.Run("one-byte-chunks", func(t *testing.T) {
+		assertChunks(t, byteChunks)
+	})
 }

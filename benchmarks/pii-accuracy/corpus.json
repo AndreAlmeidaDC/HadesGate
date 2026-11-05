@@ -113,5 +113,20 @@
   {"id":"negative_cid_release_code","text":"A release J45.0 do componente foi cancelada no changelog técnico.","expected":[],"language":"pt-BR","tags":["negative","collision"]},
   {"id":"negative_phone_short_extension","text":"Ramal interno 4321 e protocolo 98765 não são telefones.","expected":[],"language":"pt-BR","tags":["negative","phone"]},
   {"id":"negative_date_and_time","text":"Reunião em 04/11/2026 às 12:34:56, versão 3.14.159.","expected":[],"language":"pt-BR","tags":["negative","collision"]},
-  {"id":"negative_all_zero_documents","text":"CPF 000.000.000-00, CNPJ 00.000.000/0000-00 e cartão 0000 0000 0000 0000 são sentinelas.","expected":[],"language":"pt-BR","tags":["negative","validator"]}
+  {"id":"negative_all_zero_documents","text":"CPF 000.000.000-00, CNPJ 00.000.000/0000-00 e cartão 0000 0000 0000 0000 são sentinelas.","expected":[],"language":"pt-BR","tags":["negative","validator"]},
+  {"id":"negative_generic_private_key_label","text":"A chave privada do servidor começa no bloco PEM descrito abaixo.","expected":[],"language":"pt-BR","tags":["negative","collision","secret"]},
+  {"id":"negative_encryption_key_label","text":"A chave de criptografia será gerada somente durante a instalação.","expected":[],"language":"pt-BR","tags":["negative","collision","secret"]},
+  {"id":"negative_trace_uuid_lowercase","text":"trace_id 550e8400-e29b-41d4-a716-446655440000 acompanhou a requisição.","expected":[],"language":"pt-BR","tags":["negative","collision","uuid"]},
+  {"id":"negative_deployment_uuid","text":"Deployment ID 6ba7b810-9dad-11d1-80b4-00c04fd430c8 concluído sem erros.","expected":[],"language":"pt-BR","tags":["negative","collision","uuid"]},
+  {"id":"negative_repeated_one_credit_card","text":"O formulário usa 1111 1111 1111 1111 como valor sentinela.","expected":[],"language":"pt-BR","tags":["negative","validator","credit-card"]},
+  {"id":"negative_medical_record_catalog_prefix","text":"Paciente no ambulatório, prontuário REC-987452 registrado.","expected":[{"type":"MEDICAL_ID","text":"REC-987452"}],"language":"pt-BR","tags":["collision","health"]},
+  {"id":"negative_sun_dose_medication_collision","text":"A dose de sol recomendada pela manhã foi de quinze minutos.","expected":[],"language":"pt-BR","tags":["negative","collision","medication"]},
+  {"id":"negative_receita_federal_iron_collision","text":"A Receita Federal fiscalizou a carga de ferro no porto.","expected":[],"language":"pt-BR","tags":["negative","collision","medication"]},
+  {"id":"negative_city_joao_pessoa","text":"O congresso acontecerá em João Pessoa durante o mês de maio.","expected":[],"language":"pt-BR","tags":["negative","collision","person","location"]},
+  {"id":"negative_city_vitoria_conquista","text":"A rodovia entre Vitória da Conquista e Salvador está liberada.","expected":[],"language":"pt-BR","tags":["negative","collision","person","location"]},
+  {"id":"negative_incomplete_provider_key","text":"Use o prefixo sk-proj- seguido do segredo no arquivo de configuração.","expected":[],"language":"pt-BR","tags":["negative","secret","documentation"]},
+  {"id":"negative_bearer_placeholder","text":"Authorization: Bearer <token> é apenas a sintaxe documentada.","expected":[],"language":"pt-BR","tags":["negative","secret","documentation"]},
+  {"id":"negative_public_key_header","text":"O cabeçalho -----BEGIN PUBLIC KEY----- identifica uma chave pública.","expected":[],"language":"pt-BR","tags":["negative","secret","documentation"]},
+  {"id":"negative_invalid_vehicle_vin_letter_o","text":"VIN inválido 1HGBH41JXMN10918O usado no manual técnico.","expected":[],"language":"pt-BR","tags":["negative","validator","vehicle"]},
+  {"id":"negative_invalid_cnh_repeated_digits","text":"CNH 99999999999 é um valor fictício reservado para testes.","expected":[],"language":"pt-BR","tags":["negative","validator"]}
 ]

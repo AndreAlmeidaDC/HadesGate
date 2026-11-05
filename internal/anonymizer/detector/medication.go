@@ -45,6 +45,7 @@ var ambiguousPharmaWords = map[string]bool{
 // is overwhelmingly more common than a pharmaceutical reference.
 var excludedPharmaWords = map[string]bool{
 	"brasil": true,
+	"testes": true,
 }
 
 // MedicationCatalogStatus reports the runtime state of the pharmacological catalog.

@@ -52,8 +52,11 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 
 ## Phase 5 — Measurable Detection Quality
 
-- [x] Build a multilingual accuracy corpus with 115 scenarios, including positive, negative, mixed, compact, validator, and adversarial collision controls.
+- [x] Build a multilingual accuracy corpus with 130 scenarios, including positive, negative, mixed, compact, validator, and adversarial collision controls.
 - [x] Gate CI on deterministic detector precision and recall globally and per entity type (`pii-benchmark`), with structural minimums for cases, negative controls, and covered types.
+- [x] Add hard-negative collision suites for UUIDs, locations, documentation placeholders, sentinels, medical identifiers, and pharmaceutical catalog homonyms.
+- [x] Add metamorphic detector tests across Unicode context, line breaks, JSON, and Markdown while validating exact UTF-8 byte spans.
+- [x] Exhaustively validate detokenization at every stream chunk boundary, including one-byte chunks and mandatory EOF flush.
 - [x] Track latency and allocations with Go benchmarks.
 - [x] Keep semantic accuracy/performance separate by leaving the sidecar disabled in core gates.
 
@@ -95,7 +98,7 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 - [x] Expand contextual proper name detection (`detector/name.go`) with extensive greeting, honorific, role, invoice, and action verb triggers.
 - [x] Support Brazilian proper names immediately followed by document appositions without commas (e.g., `"cobrança para Rodolfo Bandeira de CPF: 09897684492"`).
 - [x] Harden UTF-8 rune boundary slicing in context extraction routines.
-- [x] Expand `benchmarks/pii-accuracy/corpus.json` to 115 cases across 30 entity types, maintaining 100% measured precision and recall (global/per-type gate threshold $\ge 90\%$).
+- [x] Expand `benchmarks/pii-accuracy/corpus.json` to 130 cases across 30 entity types, maintaining 100% measured precision and recall (global/per-type gate threshold $\ge 90\%$).
 - [x] Provide Windows PowerShell environment scripts (`scripts/enable-hadesgate.ps1`, `scripts/disable-hadesgate.ps1`) for transparent CLI AI tooling interception (Aider, Claude Code, Cursor).
 
 ---
