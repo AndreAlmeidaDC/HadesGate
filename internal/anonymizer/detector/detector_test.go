@@ -104,6 +104,14 @@ func TestValidatePhone(t *testing.T) {
 	}
 }
 
+func TestValidateCreditCardRejectsRepeatedSentinelDigits(t *testing.T) {
+	for _, value := range []string{"0000 0000 0000 0000", "1111 1111 1111 1111"} {
+		if ValidateCreditCard(value) {
+			t.Fatalf("repeated sentinel %q passed credit-card validation", value)
+		}
+	}
+}
+
 func TestValidateCNH(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -157,6 +165,14 @@ func TestPIXDetector(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestPIXDetector_DoesNotTreatGenericSecretLabelsAsPIX(t *testing.T) {
+	d := NewPIXDetector()
+	text := "A chave privada do servidor começa no bloco PEM abaixo."
+	if matches := d.Detect(text); len(matches) != 0 {
+		t.Fatalf("generic private-key label was classified as PIX: %+v", matches)
+	}
 }
 
 func TestRGDetector(t *testing.T) {

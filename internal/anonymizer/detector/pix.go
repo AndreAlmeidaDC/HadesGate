@@ -9,7 +9,7 @@ import (
 var uuidEVPRegex = regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
 
 // contextualPIXPrefixRegex captures explicit PIX key assignments (e.g. "chave pix: 12345678900", "pix joao@empresa.com").
-var contextualPIXPrefixRegex = regexp.MustCompile(`(?i)\b(?:chave\s+pix|pix(?:\s+copia\s+e\s+cola)?|chave)\s*(?::|=|\sé\s|\sfoi\s)?\s*([a-zA-Z0-9._%+\-@()]+)`)
+var contextualPIXPrefixRegex = regexp.MustCompile(`(?i)\b(?:chave\s+pix|pix(?:\s+copia\s+e\s+cola)?)\s*(?::|=|\sé\s|\sfoi\s)?\s*([a-zA-Z0-9._%+\-@()]+)`)
 
 // PIXDetector identifies Brazilian Central Bank PIX payment keys.
 type PIXDetector struct{}
@@ -26,7 +26,7 @@ func (d *PIXDetector) Type() EntityType {
 
 // ContextWords returns keywords that provide contextual evidence for PIX keys.
 func (d *PIXDetector) ContextWords() []string {
-	return []string{"pix", "chave pix", "chave", "copia e cola", "transferencia pix", "pagamento pix", "pagar pix", "banco central"}
+	return []string{"pix", "chave pix", "pix copia e cola", "transferencia pix", "pagamento pix", "pagar pix"}
 }
 
 // Detect scans text for PIX keys (Random EVP UUIDs and contextual keys).

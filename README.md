@@ -433,13 +433,13 @@ make quality   # roda go vet, testes unitários, gate de acurácia PII e tsc
 make bench     # microbenchmarks de latência e alocações do motor
 ```
 
-O CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) bloqueia regressões de precisão/recall (`≥ 90%`) dos detectores determinísticos e valida o typecheck estático do painel.
+O CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) valida um corpus determinístico com **115 cenários** (76 positivos, 39 controles negativos e 30 tipos de entidade). O gate exige precisão e recall `≥ 90%` tanto no agregado quanto em **cada tipo**, além de validar a estrutura mínima do corpus e o typecheck estático do painel.
 
 ---
 
 ## 🗺️ Roadmap
 
-Veja o [ROADMAP completo](./docs/ROADMAP.md). Próximos passos incluem novos detectores internacionais, mais métricas no dashboard e ampliação do corpus de acurácia.
+Veja o [ROADMAP completo](./docs/ROADMAP.md). Próximos passos incluem governança, retenção, resiliência operacional e expansão contínua dos cenários adversariais do corpus.
 
 ---
 

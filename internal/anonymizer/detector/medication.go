@@ -23,6 +23,10 @@ const (
 // dosageSuffixPattern matches clinical dosage and administration unit expressions following a medication name.
 var dosageSuffixPattern = regexp.MustCompile(`^(?:\s+(?:[0-9]+(?:[.,][0-9]+)?\s*(?:mg|g|mcg|ml|gotas|comprimidos?|c[aá]psulas?|ampolas?)))\b`)
 
+// identifierSuffixPattern distinguishes short catalog terms from identifier
+// prefixes such as REC-987452, which must be handled by their own detector.
+var identifierSuffixPattern = regexp.MustCompile(`^-\d`)
+
 // ambiguousPharmaWords contains short terms or common Portuguese homonyms present in pharmaceutical registries
 // that strictly require nearby clinical context (dosage, prescription, symptoms) to avoid false positives.
 var ambiguousPharmaWords = map[string]bool{
@@ -35,6 +39,12 @@ var ambiguousPharmaWords = map[string]bool{
 	"teste": true, "test": true, "kit": true, "pasta": true, "po": true, "gas": true,
 	"base": true, "vida": true, "ativo": true, "inativo": true, "similar": true, "novo": true,
 	"simples": true, "composto": true, "marca": true, "produto": true, "solucao": true,
+}
+
+// excludedPharmaWords are catalog collisions whose ordinary-language meaning
+// is overwhelmingly more common than a pharmaceutical reference.
+var excludedPharmaWords = map[string]bool{
+	"brasil": true,
 }
 
 // MedicationCatalogStatus reports the runtime state of the pharmacological catalog.
@@ -161,9 +171,15 @@ func (d *MedicationDetector) Detect(text string) []Match {
 
 		matchedText := text[start:end]
 		normTerm := normalizeMedicationText(matchedText)
+		if excludedPharmaWords[normTerm] {
+			continue
+		}
 
 		// Check if a clinical dosage suffix follows immediately (e.g. " 500mg" or " 10 ml")
 		remaining := text[end:]
+		if identifierSuffixPattern.MatchString(remaining) {
+			continue
+		}
 		if dosageLoc := dosageSuffixPattern.FindStringIndex(remaining); dosageLoc != nil && dosageLoc[0] == 0 {
 			end = end + dosageLoc[1]
 			matchedText = text[start:end]

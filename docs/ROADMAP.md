@@ -52,8 +52,8 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 
 ## Phase 5 — Measurable Detection Quality
 
-- [x] Build a Portuguese/LGPD accuracy corpus with positive and negative controls.
-- [x] Gate CI on deterministic detector precision and recall (`pii-benchmark`).
+- [x] Build a multilingual accuracy corpus with 115 scenarios, including positive, negative, mixed, compact, validator, and adversarial collision controls.
+- [x] Gate CI on deterministic detector precision and recall globally and per entity type (`pii-benchmark`), with structural minimums for cases, negative controls, and covered types.
 - [x] Track latency and allocations with Go benchmarks.
 - [x] Keep semantic accuracy/performance separate by leaving the sidecar disabled in core gates.
 
@@ -95,7 +95,7 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 - [x] Expand contextual proper name detection (`detector/name.go`) with extensive greeting, honorific, role, invoice, and action verb triggers.
 - [x] Support Brazilian proper names immediately followed by document appositions without commas (e.g., `"cobrança para Rodolfo Bandeira de CPF: 09897684492"`).
 - [x] Harden UTF-8 rune boundary slicing in context extraction routines.
-- [x] Expand `benchmarks/pii-accuracy/corpus.json` with positive and negative controls maintaining 100% precision and recall (gate threshold $\ge 90\%$).
+- [x] Expand `benchmarks/pii-accuracy/corpus.json` to 115 cases across 30 entity types, maintaining 100% measured precision and recall (global/per-type gate threshold $\ge 90\%$).
 - [x] Provide Windows PowerShell environment scripts (`scripts/enable-hadesgate.ps1`, `scripts/disable-hadesgate.ps1`) for transparent CLI AI tooling interception (Aider, Claude Code, Cursor).
 
 ---

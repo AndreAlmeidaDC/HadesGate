@@ -60,7 +60,7 @@ Ou execute cada etapa individualmente:
 | `make lint` | `CGO_ENABLED=0 go vet ./...` + `npx tsc --noEmit` no `frontend/` |
 | `make test` | `CGO_ENABLED=0 go test -count=1 ./cmd/... ./internal/...` |
 | `make test-race` | `go test -race -count=1 ./cmd/... ./internal/...` |
-| `make accuracy` | Gate `cmd/pii-benchmark` exigindo **precisão ≥ 90%** e **recall ≥ 90%** no corpus `benchmarks/pii-accuracy/corpus.json` |
+| `make accuracy` | Gate `cmd/pii-benchmark` exigindo **precisão ≥ 90%** e **recall ≥ 90%** no agregado e por tipo, além de mínimos de 100 casos, 25 controles negativos e 20 tipos |
 | `make bench` | Microbenchmarks de latência e alocações (`-benchmem`) do motor de anonimização |
 
 ---
@@ -70,7 +70,7 @@ Ou execute cada etapa individualmente:
 1. Crie ou edite o detector em `internal/anonymizer/detector/<nome>.go` priorizando validação determinística (checksum matemático como Módulo 11, Luhn, Mod-97 ou entropia/prefixo exato) para manter latência sub-milissegundo e baixo falso positivo.
 2. Adicione testes unitários cobrindo casos válidos, inválidos e bordas em `internal/anonymizer/detector/<nome>_test.go`.
 3. Registre o detector em `internal/anonymizer/engine.go` e sua flag de configuração em `internal/config/config.go` (se aplicável), além da classificação em `internal/observability/`.
-4. Adicione exemplos positivos e negativos em `benchmarks/pii-accuracy/corpus.json` e rode `make accuracy` para comprovar que precisão e recall permanecem ≥ `0.90`.
+4. Adicione exemplos positivos, negativos e de colisão em `benchmarks/pii-accuracy/corpus.json`, com IDs únicos e os campos opcionais `language`/`tags`, e rode `make accuracy` para comprovar que precisão e recall permanecem ≥ `0.90` globalmente e em cada tipo.
 
 ---
 

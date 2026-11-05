@@ -150,3 +150,14 @@ func TestMedicationDetector_Detect(t *testing.T) {
 	}
 }
 
+func TestMedicationDetector_RejectsCatalogHomonymsAndMedicalIdentifiers(t *testing.T) {
+	d := NewMedicationDetector()
+	for _, text := range []string{
+		"Banco Central do Brasil e Receita Federal publicaram a norma.",
+		"Paciente no ambulatório, Prontuário REC-987452 registrado.",
+	} {
+		if matches := d.Detect(text); len(matches) != 0 {
+			t.Fatalf("non-medication text %q produced matches: %+v", text, matches)
+		}
+	}
+}

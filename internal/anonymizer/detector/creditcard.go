@@ -82,6 +82,19 @@ func ValidateCreditCard(raw string) bool {
 		return false
 	}
 
+	// Repeated sentinel values such as 0000... pass Luhn mathematically but
+	// are not issued payment-card numbers and create noisy false positives.
+	allEqual := true
+	for _, digit := range digits[1:] {
+		if digit != digits[0] {
+			allEqual = false
+			break
+		}
+	}
+	if allEqual {
+		return false
+	}
+
 	// Luhn check
 	sum := 0
 	alternate := false
