@@ -113,20 +113,20 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 - [x] Desabilitar por padrão URLs com credenciais (`/p/{key}` e `/t/{proxy_key}`), preservando uma flag temporária de migração.
 - [x] Fixar toolchain Go corrigida, tornar o build npm determinístico e adicionar gates de vulnerabilidade ao CI.
 - [x] Aplicar DLP de saída incremental a streams SSE, conteúdo e tool calls fragmentadas, preservando plaintexts legítimos restaurados pelo vault.
-- [ ] Criptografar os demais segredos operacionais persistidos no SQLite e torná-los write-only na API.
+- [x] Criptografar os demais segredos operacionais persistidos no SQLite e torná-los write-only na API.
 - [x] Isolar consultas e purge de traces por tenant, mantendo consulta e purge global exclusivos do administrador.
 - [x] Fechar CORS por padrão, rejeitar preflight não autorizado e conceder Private Network Access apenas a origens explicitamente permitidas.
 - [x] Bloquear SSRF por resolução DNS/IP, inclusive loopback, link-local, redes privadas e DNS rebinding fora de upstreams locais explicitamente autorizados.
-- [ ] Aplicar recarga dinâmica de CORS e headers HTTP adicionais.
+- [x] Aplicar recarga dinâmica e atômica de CORS; manter headers OWASP imutáveis e seguros por padrão.
 - [x] Usar bind de rede local por padrão com opt-in explícito para exposição externa e perfil Docker documentado.
 
 ### Phase 18 — Segredos Operacionais & Zero-Trust Runtime
 
-- [ ] Criptografar segredos operacionais persistidos com AES-256-GCM e chave mestra externa ao SQLite.
-- [ ] Tornar campos secretos write-only na API e no Console, com rotação sem exposição do valor atual.
+- [x] Criptografar segredos operacionais persistidos com AES-256-GCM, AAD por registro e chave mestra externa ao SQLite.
+- [x] Tornar campos secretos write-only na API e no Console, com rotação sem exposição do valor atual.
 - [x] Adicionar proteção SSRF baseada em resolução DNS/IP, conexão fixada ao IP validado e bloqueio de redirecionamentos.
 - [x] Introduzir `HADESGATE_BIND_ADDRESS` seguro por padrão e perfil explícito para Docker Compose.
-- [ ] Eliminar data races em recargas dinâmicas com snapshots imutáveis/atômicos de configuração.
+- [x] Eliminar data races em recargas dinâmicas com snapshots imutáveis/atômicos de configuração e gate `go test -race`.
 
 ### Phase 19 — Governança, Retenção & Auditoria Enterprise
 

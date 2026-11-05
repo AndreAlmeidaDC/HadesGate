@@ -21,6 +21,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
   - Isolamento de consultas e exclusão de traces por tenant; somente o administrador pode consultar ou apagar a telemetria global.
   - CORS fechado por padrão, preflight não autorizado rejeitado e Private Network Access condicionado a uma origem permitida.
 - **Fase 18 — Zero-Trust Runtime**:
+  - Segredos operacionais (`global_proxy_key`, chaves de tenant, URL e segredo de webhook) criptografados no SQLite com AES-256-GCM, nonce aleatório, AAD por registro e envelope versionado `enc:v1`.
+  - Migração transacional automática de plaintext legado e inicialização fail-closed para chave mestra ausente/incorreta ou ciphertext adulterado.
+  - API e Console write-only: exibem apenas estado `configured`, preservam valores quando o campo fica vazio e permitem rotação com revelação única da nova chave.
+  - Configurações mutáveis de CORS, egress scan e Ollama usam snapshots/valores atômicos, com recarga sem reinício e cobertura do race detector.
   - Proteção SSRF com validação de todos os resultados DNS, bloqueio permanente de metadata/link-local e conexão fixada ao IP validado contra DNS rebinding.
   - Redes loopback/RFC1918 exigem autorização explícita; allowlist de upstream dinâmico continua validando host e porta exatos.
   - Servidor HTTP passa a escutar em `127.0.0.1` por padrão via `HADESGATE_BIND_ADDRESS`; Docker Compose declara `0.0.0.0` apenas dentro do container.

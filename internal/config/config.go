@@ -19,6 +19,7 @@ type Config struct {
 	AdminKey                    string
 	ProxyKey                    string
 	ProviderFingerprintSecret   string
+	ConfigMasterKey             string
 	AllowLegacyURLKeys          bool
 	OpenAIBaseURL               string
 	OpenAIKey                   string
@@ -158,6 +159,9 @@ func Load() *Config {
 	}
 	if val := os.Getenv("HADESGATE_FINGERPRINT_SECRET"); val != "" {
 		cfg.ProviderFingerprintSecret = strings.TrimSpace(val)
+	}
+	if val := os.Getenv("HADESGATE_CONFIG_MASTER_KEY"); val != "" {
+		cfg.ConfigMasterKey = strings.TrimSpace(val)
 	}
 	if val := os.Getenv("HADESGATE_ALLOW_LEGACY_URL_KEYS"); val != "" {
 		cfg.AllowLegacyURLKeys = strings.EqualFold(val, "true") || val == "1"

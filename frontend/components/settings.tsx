@@ -34,8 +34,11 @@ interface DynamicConfig {
   family_thresholds?: Record<string, number>;
   entity_thresholds?: Record<string, number>;
   global_proxy_key: string;
+  global_proxy_key_configured: boolean;
   webhook_url: string;
+  webhook_url_configured: boolean;
   webhook_secret: string;
+  webhook_secret_configured: boolean;
   webhook_events: string[];
   enable_egress_scan: boolean;
   ollama_base_url: string;
@@ -46,6 +49,7 @@ interface TenantConfig {
   id: string;
   name: string;
   proxy_key: string;
+  proxy_key_configured: boolean;
   rate_limit: number;
   entity_actions: Record<string, string>;
   updated_at?: string;
@@ -182,12 +186,15 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
     family_thresholds: {},
     entity_thresholds: {},
     global_proxy_key: "",
+    global_proxy_key_configured: false,
     webhook_url: "",
+    webhook_url_configured: false,
     webhook_secret: "",
+    webhook_secret_configured: false,
     webhook_events: ["block", "egress_leak", "rate_limit"],
     enable_egress_scan: false,
     ollama_base_url: "http://localhost:11434/v1",
-    cors_allowed_origins: ["*"],
+    cors_allowed_origins: [],
   });
 
   const [selectedFamilyFilter, setSelectedFamilyFilter] = useState<string>("ALL");
@@ -211,6 +218,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
   const [editTenantLimit, setEditTenantLimit] = useState<number>(100);
   const [editTenantActions, setEditTenantActions] = useState<Record<string, string>>({});
   const [savingTenant, setSavingTenant] = useState<boolean>(false);
+  const [rotatedGlobalKey, setRotatedGlobalKey] = useState<string>("");
 
   // Webhook test state
   const [testingWebhook, setTestingWebhook] = useState<boolean>(false);
@@ -220,12 +228,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
   const [syncingAnvisa, setSyncingAnvisa] = useState<boolean>(false);
 
   const generateRandomKey = (prefix: string = "sec_HG") => {
-    const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-    let rand = "";
-    for (let i = 0; i < 16; i++) {
-      rand += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return `${prefix}_${rand}`;
+    const random = new Uint8Array(24);
+    crypto.getRandomValues(random);
+    const encoded = Array.from(random, (value) => value.toString(16).padStart(2, "0")).join("");
+    return `${prefix}_${encoded}`;
   };
 
   useEffect(() => {
@@ -253,8 +259,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
           family_thresholds: data.family_thresholds || {},
           entity_thresholds: data.entity_thresholds || {},
           global_proxy_key: data.global_proxy_key || "",
+          global_proxy_key_configured: !!data.global_proxy_key_configured,
           webhook_url: data.webhook_url || "",
+          webhook_url_configured: !!data.webhook_url_configured,
           webhook_secret: data.webhook_secret || "",
+          webhook_secret_configured: !!data.webhook_secret_configured,
           webhook_events: data.webhook_events || [
             "block",
             "egress_leak",
@@ -263,7 +272,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
           enable_egress_scan: !!data.enable_egress_scan,
           ollama_base_url:
             data.ollama_base_url || "http://localhost:11434/v1",
-          cors_allowed_origins: data.cors_allowed_origins || ["*"],
+          cors_allowed_origins: data.cors_allowed_origins || [],
         });
       }
 
@@ -319,6 +328,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         const err = await res.json();
         throw new Error(err.error?.message || "Erro desconhecido");
       }
+	  const data = await res.json();
+	  if (data.config) {
+		setConfig({ ...data.config, global_proxy_key: "", webhook_secret: "" });
+	  }
 
       notify(
         "success",
@@ -375,7 +388,6 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
       ...config,
       global_proxy_key: newKey,
     };
-    setConfig(updatedCfg);
 
     try {
       const res = await fetch(`${gatewayUrl}/api/config`, {
@@ -390,6 +402,13 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
       if (!res.ok) {
         throw new Error("Falha ao salvar rotação da chave global");
       }
+
+	  const data = await res.json();
+	  if (data.config) {
+		setConfig({ ...data.config, global_proxy_key: "", webhook_secret: "" });
+	  }
+	  setRotatedGlobalKey(newKey);
+	  await navigator.clipboard.writeText(newKey);
 
       notify(
         "success",
@@ -434,6 +453,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         id: "",
         name: payload.name,
         proxy_key: payload.proxy_key,
+		proxy_key_configured: true,
         rate_limit: payload.rate_limit,
         entity_actions: {},
       };
@@ -455,7 +475,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
   const handleOpenEditTenant = (ten: TenantConfig) => {
     setEditingTenant(ten);
     setEditTenantName(ten.name || "");
-    setEditTenantKey(ten.proxy_key || "");
+    setEditTenantKey("");
     setEditTenantLimit(ten.rate_limit || 0);
     setEditTenantActions({ ...(ten.entity_actions || {}) });
   };
@@ -488,17 +508,13 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         const err = await res.json();
         throw new Error(err.error?.message || "Falha ao atualizar tenant");
       }
+	  const responseData = await res.json();
+	  const updatedTenant: TenantConfig = responseData.tenant;
 
       setTenants((prev) =>
         prev.map((tItem) =>
           tItem.id === editingTenant.id
-            ? {
-                ...tItem,
-                name: payload.name,
-                proxy_key: payload.proxy_key,
-                rate_limit: payload.rate_limit,
-                entity_actions: payload.entity_actions,
-              }
+			? updatedTenant
             : tItem
         )
       );
@@ -1132,6 +1148,14 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
               <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
+                  onClick={handleRotateGlobalKey}
+                  className="h-8 px-3 border border-amber-600 bg-amber-950/20 hover:bg-amber-900/30 text-amber-300 font-mono text-[10px] uppercase font-bold flex items-center gap-1.5 transition-colors"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  <span>{t.settings.rotateKey}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() =>
                     handleCopyText(
                       `${gatewayUrl}/v1`,
@@ -1157,6 +1181,17 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             <div className="font-mono text-[9px] text-muted-foreground">
               ✦ <span className="text-foreground font-bold">BYOK:</span> {t.settings.globalProxyDesc}
             </div>
+            <div className="font-mono text-[9px] uppercase text-muted-foreground">
+              {config.global_proxy_key_configured
+                ? t.settings.secretConfigured
+                : t.settings.secretNotConfigured}
+            </div>
+            {rotatedGlobalKey && (
+              <div className="border-2 border-amber-600 bg-amber-950/20 p-3 font-mono text-[10px] text-amber-200 break-all">
+                <span className="font-bold uppercase">{t.settings.keyCopiedOnce}</span>
+                <div className="mt-1 select-all text-foreground">{rotatedGlobalKey}</div>
+              </div>
+            )}
           </div>
 
           {/* Add Tenant Form */}
@@ -1274,7 +1309,9 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                             {ten.name || "—"}
                           </td>
                           <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground">
-                            {ten.proxy_key.slice(0, 6)}••••••••
+                            {ten.proxy_key_configured
+                              ? t.settings.secretConfigured
+                              : t.settings.secretNotConfigured}
                           </td>
                           <td className="py-2.5 px-3">
                             <span className="px-2 py-0.5 border border-purple-600/40 bg-purple-950/20 text-purple-400 text-[10px] font-bold">
@@ -1506,11 +1543,15 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                     </button>
                   </div>
                   <input
-                    type="text"
+                    type="password"
                     value={editTenantKey}
                     onChange={(e) => setEditTenantKey(e.target.value)}
+                    placeholder={
+                      editingTenant.proxy_key_configured
+                        ? t.settings.secretUnchanged
+                        : "sec_HG_..."
+                    }
                     className="w-full h-9 px-3 border border-border bg-secondary font-mono text-xs text-foreground focus:outline-none focus:border-purple-600"
-                    required
                   />
                   <span className="block font-mono text-[9px] text-muted-foreground mt-1">
                     {t.settings.providerCredentialDesc}
@@ -1720,7 +1761,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
               </label>
               <input
                 type="url"
-                placeholder="https://discord.com/api/webhooks/... ou https://hooks.slack.com/..."
+				placeholder={
+				  config.webhook_url_configured
+					? t.settings.secretUnchanged
+					: "https://discord.com/api/webhooks/..."
+				}
                 value={config.webhook_url}
                 onChange={(e) =>
                   setConfig((prev) => ({
@@ -1730,6 +1775,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                 }
                 className="w-full h-10 px-3 border border-border bg-secondary font-mono text-xs text-foreground focus:outline-none focus:border-purple-600"
               />
+			  <span className="block mt-1 font-mono text-[9px] uppercase text-muted-foreground">
+				{config.webhook_url_configured
+				  ? t.settings.secretConfigured
+				  : t.settings.secretNotConfigured}
+			  </span>
             </div>
 
             <div>
@@ -1738,7 +1788,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
               </label>
               <input
                 type="password"
-                placeholder="Chave secreta para validação no header X-HadesGate-Signature"
+                placeholder={
+                  config.webhook_secret_configured
+                    ? t.settings.secretUnchanged
+                    : t.settings.newSecretPlaceholder
+                }
                 value={config.webhook_secret}
                 onChange={(e) =>
                   setConfig((prev) => ({
@@ -1748,6 +1802,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                 }
                 className="w-full h-10 px-3 border border-border bg-secondary font-mono text-xs text-foreground focus:outline-none focus:border-purple-600"
               />
+              <span className="block mt-1 font-mono text-[9px] uppercase text-muted-foreground">
+                {config.webhook_secret_configured
+                  ? t.settings.secretConfigured
+                  : t.settings.secretNotConfigured}
+              </span>
             </div>
 
             <div>
@@ -1809,7 +1868,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
               <button
                 type="button"
                 onClick={handleTestWebhook}
-                disabled={testingWebhook || !config.webhook_url}
+				disabled={testingWebhook || (!config.webhook_url && !config.webhook_url_configured)}
                 className="h-9 px-4 border border-zinc-700 bg-secondary hover:border-purple-600 text-foreground font-mono text-xs font-bold uppercase tracking-[0.08em] flex items-center gap-2 transition-colors disabled:opacity-40"
               >
                 {testingWebhook ? (

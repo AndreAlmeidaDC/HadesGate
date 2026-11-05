@@ -37,6 +37,7 @@ type Server struct {
 	store                     *config.Store
 	webhook                   *webhook.Dispatcher
 	upstream                  *proxy.UpstreamDispatcher
+	securityPolicy            *SecurityPolicy
 }
 
 // NewServer creates a new web Server.
@@ -73,6 +74,11 @@ func (s *Server) SetProviderFingerprintSecret(secret string) {
 // SetDefaultRateLimit preserves the boot-level global limiter across dynamic reloads.
 func (s *Server) SetDefaultRateLimit(limit int) {
 	s.defaultRateLimit = limit
+}
+
+// SetSecurityPolicy enables atomic hot reload of CORS origins and HTTP security policy.
+func (s *Server) SetSecurityPolicy(policy *SecurityPolicy) {
+	s.securityPolicy = policy
 }
 
 func requestAPIKey(r *http.Request) string {
@@ -597,6 +603,9 @@ func (s *Server) reloadGateway(ctx context.Context) error {
 			Events: evts,
 		})
 	}
+	if s.securityPolicy != nil {
+		s.securityPolicy.UpdateAllowedOrigins(dynCfg.CORSAllowedOrigins)
+	}
 
 	fingerprints, err := s.store.ProviderKeyFingerprints(ctx)
 	if err != nil {
@@ -621,10 +630,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
 			return
 		}
-		if cfg.GlobalProxyKey == "" && s.gateway != nil {
-			cfg.GlobalProxyKey = s.gateway.GlobalProxyKey()
+		globalConfigured := cfg.GlobalProxyKey != ""
+		if !globalConfigured && s.gateway != nil {
+			globalConfigured = s.gateway.GlobalProxyKey() != ""
 		}
-		json.NewEncoder(w).Encode(cfg)
+		json.NewEncoder(w).Encode(publicDynamicConfig(cfg, globalConfigured))
 
 	case http.MethodPut:
 		var newCfg config.DynamicConfig
@@ -638,15 +648,87 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_ = s.reloadGateway(r.Context())
+		if err := s.reloadGateway(r.Context()); err != nil {
+			http.Error(w, `{"error":{"message":"Configuration saved but runtime reload failed"}}`, http.StatusInternalServerError)
+			return
+		}
+		effectiveCfg, err := s.store.GetDynamicConfig(r.Context())
+		if err != nil {
+			http.Error(w, `{"error":{"message":"Configuration saved but could not be reloaded"}}`, http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
-			"config": newCfg,
+			"config": publicDynamicConfig(effectiveCfg, effectiveCfg.GlobalProxyKey != ""),
 		})
 
 	default:
 		http.Error(w, `{"error":{"message":"Method not allowed"}}`, http.StatusMethodNotAllowed)
 	}
+}
+
+type dynamicConfigResponse struct {
+	EntityActions            map[string]string  `json:"entity_actions"`
+	GlobalProxyKey           string             `json:"global_proxy_key"`
+	GlobalProxyKeyConfigured bool               `json:"global_proxy_key_configured"`
+	WebhookURL               string             `json:"webhook_url"`
+	WebhookURLConfigured     bool               `json:"webhook_url_configured"`
+	WebhookSecret            string             `json:"webhook_secret"`
+	WebhookSecretConfigured  bool               `json:"webhook_secret_configured"`
+	WebhookEvents            []string           `json:"webhook_events"`
+	EnableEgressScan         bool               `json:"enable_egress_scan"`
+	OllamaBaseURL            string             `json:"ollama_base_url"`
+	CORSAllowedOrigins       []string           `json:"cors_allowed_origins"`
+	FamilyThresholds         map[string]float64 `json:"family_thresholds,omitempty"`
+	EntityThresholds         map[string]float64 `json:"entity_thresholds,omitempty"`
+}
+
+func publicDynamicConfig(cfg config.DynamicConfig, globalConfigured bool) dynamicConfigResponse {
+	return dynamicConfigResponse{
+		EntityActions:            cfg.EntityActions,
+		GlobalProxyKey:           "",
+		GlobalProxyKeyConfigured: globalConfigured,
+		WebhookURL:               "",
+		WebhookURLConfigured:     cfg.WebhookURL != "",
+		WebhookSecret:            "",
+		WebhookSecretConfigured:  cfg.WebhookSecret != "",
+		WebhookEvents:            cfg.WebhookEvents,
+		EnableEgressScan:         cfg.EnableEgressScan,
+		OllamaBaseURL:            cfg.OllamaBaseURL,
+		CORSAllowedOrigins:       cfg.CORSAllowedOrigins,
+		FamilyThresholds:         cfg.FamilyThresholds,
+		EntityThresholds:         cfg.EntityThresholds,
+	}
+}
+
+type tenantConfigResponse struct {
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	ProxyKey           string            `json:"proxy_key"`
+	ProxyKeyConfigured bool              `json:"proxy_key_configured"`
+	RateLimit          int               `json:"rate_limit"`
+	EntityActions      map[string]string `json:"entity_actions"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+}
+
+func publicTenant(tenant config.TenantConfig) tenantConfigResponse {
+	return tenantConfigResponse{
+		ID:                 tenant.ID,
+		Name:               tenant.Name,
+		ProxyKey:           "",
+		ProxyKeyConfigured: tenant.ProxyKey != "",
+		RateLimit:          tenant.RateLimit,
+		EntityActions:      tenant.EntityActions,
+		UpdatedAt:          tenant.UpdatedAt,
+	}
+}
+
+func publicTenants(tenants []config.TenantConfig) []tenantConfigResponse {
+	result := make([]tenantConfigResponse, 0, len(tenants))
+	for _, tenant := range tenants {
+		result = append(result, publicTenant(tenant))
+	}
+	return result
 }
 
 func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
@@ -666,7 +748,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 		if tenants == nil {
 			tenants = []config.TenantConfig{}
 		}
-		json.NewEncoder(w).Encode(tenants)
+		json.NewEncoder(w).Encode(publicTenants(tenants))
 
 	case http.MethodPost:
 		var tenant config.TenantConfig
@@ -687,10 +769,13 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_ = s.reloadGateway(r.Context())
+		if err := s.reloadGateway(r.Context()); err != nil {
+			http.Error(w, `{"error":{"message":"Tenant saved but runtime reload failed"}}`, http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
-			"tenant": savedTenant,
+			"tenant": publicTenant(savedTenant),
 		})
 
 	case http.MethodPut:
@@ -711,10 +796,25 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_ = s.reloadGateway(r.Context())
+		if err := s.reloadGateway(r.Context()); err != nil {
+			http.Error(w, `{"error":{"message":"Tenant saved but runtime reload failed"}}`, http.StatusInternalServerError)
+			return
+		}
+		tenants, err := s.store.ListTenants(r.Context())
+		if err != nil {
+			http.Error(w, `{"error":{"message":"Tenant saved but could not be reloaded"}}`, http.StatusInternalServerError)
+			return
+		}
+		var updated config.TenantConfig
+		for _, tenant := range tenants {
+			if tenant.ID == payload.ID {
+				updated = tenant
+				break
+			}
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
-			"tenant": payload.TenantConfig,
+			"tenant": publicTenant(updated),
 		})
 
 	case http.MethodDelete:
@@ -729,7 +829,10 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_ = s.reloadGateway(r.Context())
+		if err := s.reloadGateway(r.Context()); err != nil {
+			http.Error(w, `{"error":{"message":"Tenant deleted but runtime reload failed"}}`, http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok": true,
 		})

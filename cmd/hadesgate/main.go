@@ -23,6 +23,10 @@ import (
 
 func main() {
 	cfg := config.Load()
+	configMasterKey, keyErr := config.ParseMasterKey(cfg.ConfigMasterKey)
+	if keyErr != nil {
+		log.Fatalf("configuration encryption unavailable: %v", keyErr)
+	}
 
 	log.Println("==================================================")
 	log.Println("   HADESGATE // TACTICAL DATA ANONYMIZATION       ")
@@ -81,9 +85,9 @@ func main() {
 	defer traceLogger.Close()
 
 	// 4. Initialize Dynamic Configuration & Multitenancy Store (Phase 13)
-	configStore, err := config.NewStore(traceLogger.DB())
+	configStore, err := config.NewStore(traceLogger.DB(), configMasterKey)
 	if err != nil {
-		log.Printf("⚠️  Failed to initialize dynamic config store: %v", err)
+		log.Fatalf("encrypted configuration store unavailable: %v", err)
 	} else {
 		var initialTenants []config.TenantConfig
 		for id, key := range cfg.TenantProxyKeys {
@@ -214,6 +218,8 @@ func main() {
 	webServer.SetUpstream(upstream)
 	webServer.SetProviderFingerprintSecret(cfg.ProviderFingerprintSecret)
 	webServer.SetDefaultRateLimit(cfg.RateLimitPerMinute)
+	securityPolicy := web.NewSecurityPolicy(cfg.CORSAllowedOrigins)
+	webServer.SetSecurityPolicy(securityPolicy)
 
 	mux := http.NewServeMux()
 
@@ -238,7 +244,7 @@ func main() {
 	webServer.RegisterRoutes(mux)
 
 	// Wrap with Security & CORS middleware (configurable allowed origins)
-	handler := web.SecurityMiddleware(mux, cfg.CORSAllowedOrigins)
+	handler := securityPolicy.Handler(mux)
 
 	server := &http.Server{
 		Addr:         net.JoinHostPort(cfg.BindAddress, strconv.Itoa(cfg.Port)),

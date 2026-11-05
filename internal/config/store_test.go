@@ -1,14 +1,21 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+var testConfigMasterKey = []byte("0123456789abcdef0123456789abcdef")
 
 func TestConfigStore_CRUD(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
@@ -17,7 +24,7 @@ func TestConfigStore_CRUD(t *testing.T) {
 	}
 	defer db.Close()
 
-	store, err := NewStore(db)
+	store, err := NewStore(db, testConfigMasterKey)
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -158,6 +165,116 @@ func TestConfigStore_CRUD(t *testing.T) {
 	}
 }
 
+func TestConfigStore_SecretsAreNeverPersistedAsPlaintext(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("opening sqlite: %v", err)
+	}
+	defer db.Close()
+
+	store, err := NewStore(db, testConfigMasterKey)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	ctx := context.Background()
+	const globalKey = "sec_HG_global_plaintext_forbidden"
+	const webhookSecret = "webhook_plaintext_forbidden"
+	const webhookURL = "https://hooks.example.test/plaintext-forbidden-token"
+	const tenantKey = "sec_HG_tenant_plaintext_forbidden"
+	if err := store.SaveDynamicConfig(ctx, DynamicConfig{
+		GlobalProxyKey: globalKey,
+		WebhookURL:     webhookURL,
+		WebhookSecret:  webhookSecret,
+	}); err != nil {
+		t.Fatalf("SaveDynamicConfig failed: %v", err)
+	}
+	if _, err := store.SaveTenant(ctx, TenantConfig{ID: "01", ProxyKey: tenantKey}); err != nil {
+		t.Fatalf("SaveTenant failed: %v", err)
+	}
+
+	for _, key := range []string{"global_proxy_key", "webhook_url", "webhook_secret"} {
+		var persisted string
+		if err := db.QueryRowContext(ctx, "SELECT value FROM system_config WHERE key = ?", key).Scan(&persisted); err != nil {
+			t.Fatalf("reading persisted %s: %v", key, err)
+		}
+		if persisted == globalKey || persisted == webhookURL || persisted == webhookSecret || !strings.HasPrefix(persisted, "enc:v1:") {
+			t.Fatalf("secret %s was not stored as a versioned encrypted envelope: %q", key, persisted)
+		}
+	}
+	var persistedTenantKey string
+	if err := db.QueryRowContext(ctx, "SELECT proxy_key FROM tenants WHERE id = '01'").Scan(&persistedTenantKey); err != nil {
+		t.Fatalf("reading tenant key: %v", err)
+	}
+	if persistedTenantKey == tenantKey || !strings.HasPrefix(persistedTenantKey, "enc:v1:") {
+		t.Fatalf("tenant key was not encrypted: %q", persistedTenantKey)
+	}
+
+	cfg, err := store.GetDynamicConfig(ctx)
+	if err != nil || cfg.GlobalProxyKey != globalKey || cfg.WebhookURL != webhookURL || cfg.WebhookSecret != webhookSecret {
+		t.Fatalf("encrypted dynamic secrets did not round-trip: cfg=%+v err=%v", cfg, err)
+	}
+	tenants, err := store.ListTenants(ctx)
+	if err != nil || len(tenants) != 1 || tenants[0].ProxyKey != tenantKey {
+		t.Fatalf("encrypted tenant key did not round-trip: tenants=%+v err=%v", tenants, err)
+	}
+}
+
+func TestConfigStore_MigratesLegacySecretsAndRejectsWrongKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("opening sqlite: %v", err)
+	}
+	defer db.Close()
+	if _, err := NewStore(db, testConfigMasterKey); err != nil {
+		t.Fatalf("initializing schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO system_config(key,value,updated_at) VALUES('global_proxy_key','legacy-global',?)`, now); err != nil {
+		t.Fatalf("inserting legacy global key: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO tenants(id,name,proxy_key,rate_limit,entity_actions,updated_at) VALUES('01','Legacy','legacy-tenant',0,'{}',?)`, now); err != nil {
+		t.Fatalf("inserting legacy tenant key: %v", err)
+	}
+
+	migrated, err := NewStore(db, testConfigMasterKey)
+	if err != nil {
+		t.Fatalf("migrating legacy secrets: %v", err)
+	}
+	cfg, err := migrated.GetDynamicConfig(ctx)
+	if err != nil || cfg.GlobalProxyKey != "legacy-global" {
+		t.Fatalf("legacy global key did not migrate: cfg=%+v err=%v", cfg, err)
+	}
+	tenants, err := migrated.ListTenants(ctx)
+	if err != nil || len(tenants) != 1 || tenants[0].ProxyKey != "legacy-tenant" {
+		t.Fatalf("legacy tenant key did not migrate: tenants=%+v err=%v", tenants, err)
+	}
+	databaseBytes, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("reading migrated database: %v", err)
+	}
+	if bytes.Contains(databaseBytes, []byte("legacy-global")) || bytes.Contains(databaseBytes, []byte("legacy-tenant")) {
+		t.Fatal("legacy plaintext remained recoverable in SQLite pages after migration")
+	}
+
+	wrongKey := []byte("abcdef0123456789abcdef0123456789")
+	if _, err := NewStore(db, wrongKey); err == nil {
+		t.Fatal("expected encrypted store initialization to reject the wrong master key")
+	}
+}
+
+func TestParseMasterKey(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString(testConfigMasterKey)
+	parsed, err := ParseMasterKey(encoded)
+	if err != nil || !bytes.Equal(parsed, testConfigMasterKey) {
+		t.Fatalf("base64 key did not parse: parsed=%x err=%v", parsed, err)
+	}
+	if _, err := ParseMasterKey("short"); err == nil {
+		t.Fatal("expected invalid master key length to fail")
+	}
+}
+
 func TestStoreProviderCredentialsPersistOnlyFingerprint(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -165,7 +282,7 @@ func TestStoreProviderCredentialsPersistOnlyFingerprint(t *testing.T) {
 	}
 	defer db.Close()
 
-	store, err := NewStore(db)
+	store, err := NewStore(db, testConfigMasterKey)
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}

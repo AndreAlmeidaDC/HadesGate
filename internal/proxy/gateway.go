@@ -156,7 +156,7 @@ func NewGatewayWithOptions(engine *anonymizer.Engine, upstream *UpstreamDispatch
 		traces:                    traces,
 		requestSlots:              make(chan struct{}, maxConcurrent),
 		policy:                    policy.New(options.EntityActions).WithFamilyResolver(familyResolver),
-		tenantKeys:                options.TenantKeys,
+		tenantKeys:                cloneStringMap(options.TenantKeys),
 		tenantPolicies:            tenantPolicies,
 		rateLimiters:              rateLimiters,
 		providerKeyFingerprints:   cloneFingerprintMap(options.ProviderKeyFingerprints),
@@ -186,6 +186,14 @@ func cloneFingerprintMap(source map[string][]string) map[string][]string {
 	cloned := make(map[string][]string, len(source))
 	for tenant, fingerprints := range source {
 		cloned[tenant] = append([]string(nil), fingerprints...)
+	}
+	return cloned
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	cloned := make(map[string]string, len(source))
+	for key, value := range source {
+		cloned[key] = value
 	}
 	return cloned
 }
@@ -581,7 +589,7 @@ func (g *Gateway) UpdateDynamicConfig(entityActions map[string]string, tenantKey
 	}
 
 	g.policy = policy.New(entityActions).WithFamilyResolver(familyResolver)
-	g.tenantKeys = tenantKeys
+	g.tenantKeys = cloneStringMap(tenantKeys)
 	if globalProxyKey != "" {
 		g.globalProxyKey = globalProxyKey
 	}

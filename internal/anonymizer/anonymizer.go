@@ -283,8 +283,16 @@ func NewEngine(cfg Config, v vault.Vault) *Engine {
 func (e *Engine) SetThresholds(family map[string]float64, entity map[string]float64) {
 	e.thresholdsMu.Lock()
 	defer e.thresholdsMu.Unlock()
-	e.familyThresholds = family
-	e.entityThresholds = entity
+	e.familyThresholds = cloneThresholds(family)
+	e.entityThresholds = cloneThresholds(entity)
+}
+
+func cloneThresholds(source map[string]float64) map[string]float64 {
+	cloned := make(map[string]float64, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // ThresholdFor returns the effective confidence score threshold for a given entity type.

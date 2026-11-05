@@ -56,6 +56,7 @@ func NewDispatcher(cfg Config) *Dispatcher {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
 	}
+	cfg.Events = cloneEvents(cfg.Events)
 	d := &Dispatcher{
 		cfg: cfg,
 		client: &http.Client{
@@ -90,12 +91,21 @@ func (d *Dispatcher) UpdateConfig(cfg Config) {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
 	}
+	cfg.Events = cloneEvents(cfg.Events)
 	d.cfg = cfg
 	d.client.Timeout = cfg.Timeout
 
 	if cfg.URL != "" {
 		d.startWorker()
 	}
+}
+
+func cloneEvents(source map[string]bool) map[string]bool {
+	cloned := make(map[string]bool, len(source))
+	for event, enabled := range source {
+		cloned[event] = enabled
+	}
+	return cloned
 }
 
 // Enabled returns true if a destination URL is configured.
@@ -289,4 +299,3 @@ func (d *Dispatcher) Close() {
 		d.wg.Wait()
 	})
 }
-

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hadesgate/hadesgate/internal/anonymizer"
@@ -49,6 +50,8 @@ type UpstreamDispatcher struct {
 	httpClient           *http.Client
 	lookupIP             lookupIPFunc
 	privateUpstreamHosts map[string]struct{}
+	enableEgressScan     atomic.Bool
+	ollamaBaseURL        atomic.Value
 }
 
 // NewUpstreamDispatcher creates a new UpstreamDispatcher.
@@ -77,6 +80,8 @@ func NewUpstreamDispatcher(cfg UpstreamConfig) *UpstreamDispatcher {
 		lookupIP:             net.DefaultResolver.LookupIPAddr,
 		privateUpstreamHosts: privateUpstreamHostSet(cfg),
 	}
+	dispatcher.enableEgressScan.Store(cfg.EnableEgressScan)
+	dispatcher.ollamaBaseURL.Store(cfg.OllamaBaseURL)
 	dispatcher.httpClient = &http.Client{
 		Timeout: cfg.Timeout,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -149,7 +154,7 @@ func (u *UpstreamDispatcher) ResolveTargetForEndpoint(r *http.Request, model, en
 	}
 
 	if strings.HasPrefix(model, "ollama/") {
-		return strings.TrimRight(u.cfg.OllamaBaseURL, "/") + endpoint, "", false, nil
+		return strings.TrimRight(u.ollamaURL(), "/") + endpoint, "", false, nil
 	}
 
 	isDefaultOpenAI := u.cfg.OpenAIBaseURL == "" || u.cfg.OpenAIBaseURL == "https://api.openai.com/v1"
@@ -323,7 +328,7 @@ func geminiRootURL(raw string) string {
 
 // ResolveLocalTarget returns the explicitly configured local OpenAI-compatible endpoint.
 func (u *UpstreamDispatcher) ResolveLocalTarget(endpoint string) string {
-	base := strings.TrimRight(u.cfg.OllamaBaseURL, "/")
+	base := strings.TrimRight(u.ollamaURL(), "/")
 	if !strings.HasSuffix(base, endpoint) {
 		base += endpoint
 	}
@@ -625,7 +630,7 @@ type streamingEgressState struct {
 }
 
 func (u *UpstreamDispatcher) streamingEgressFilterFactory(detok *stream.Detokenizer, w http.ResponseWriter) (*streamingEgressState, stream.FragmentFilterFactory) {
-	if !u.cfg.EnableEgressScan || u.cfg.Engine == nil || detok == nil {
+	if !u.enableEgressScan.Load() || u.cfg.Engine == nil || detok == nil {
 		return nil, nil
 	}
 
@@ -685,7 +690,7 @@ func (u *UpstreamDispatcher) HandleNonStreamingResponse(upstreamBody io.Reader, 
 	}
 
 	// Optional Egress DLP Scanning
-	if u.cfg.EnableEgressScan && u.cfg.Engine != nil && detok != nil {
+	if u.enableEgressScan.Load() && u.cfg.Engine != nil && detok != nil {
 		known := detok.GetKnownPlaintexts()
 		egressDetected := false
 		var leakedEntities []string
@@ -752,13 +757,20 @@ type ChatMessage struct {
 // SetEnableEgressScan updates the egress scanning flag at runtime.
 func (u *UpstreamDispatcher) SetEnableEgressScan(enabled bool) {
 	if u != nil {
-		u.cfg.EnableEgressScan = enabled
+		u.enableEgressScan.Store(enabled)
 	}
 }
 
 // SetOllamaBaseURL updates the local Ollama/agents base URL at runtime.
 func (u *UpstreamDispatcher) SetOllamaBaseURL(url string) {
 	if u != nil {
-		u.cfg.OllamaBaseURL = url
+		u.ollamaBaseURL.Store(url)
 	}
+}
+
+func (u *UpstreamDispatcher) ollamaURL() string {
+	if value := u.ollamaBaseURL.Load(); value != nil {
+		return value.(string)
+	}
+	return ""
 }

@@ -160,6 +160,11 @@ export interface Translations {
     registerCredential: string;
     noCredentials: string;
     revokeCredential: string;
+    secretConfigured: string;
+    secretNotConfigured: string;
+    secretUnchanged: string;
+    newSecretPlaceholder: string;
+    keyCopiedOnce: string;
   };
 }
 
@@ -324,6 +329,11 @@ export const translations: Record<Language, Translations> = {
       registerCredential: "REGISTRAR FINGERPRINT",
       noCredentials: "NENHUMA CREDENCIAL BYOK REGISTRADA",
       revokeCredential: "REVOGAR CREDENCIAL",
+      secretConfigured: "SEGREDO CONFIGURADO // WRITE-ONLY",
+      secretNotConfigured: "SEGREDO NÃO CONFIGURADO",
+      secretUnchanged: "CONFIGURADO — DEIXE VAZIO PARA MANTER",
+      newSecretPlaceholder: "INFORME UM NOVO SEGREDO",
+      keyCopiedOnce: "NOVA CHAVE COPIADA — VISÍVEL SOMENTE AGORA",
     },
   },
   en: {
@@ -486,6 +496,11 @@ export const translations: Record<Language, Translations> = {
       registerCredential: "REGISTER FINGERPRINT",
       noCredentials: "NO BYOK CREDENTIALS REGISTERED",
       revokeCredential: "REVOKE CREDENTIAL",
+      secretConfigured: "SECRET CONFIGURED // WRITE-ONLY",
+      secretNotConfigured: "SECRET NOT CONFIGURED",
+      secretUnchanged: "CONFIGURED — LEAVE BLANK TO KEEP",
+      newSecretPlaceholder: "ENTER A NEW SECRET",
+      keyCopiedOnce: "NEW KEY COPIED — VISIBLE ONLY NOW",
     },
   },
 };

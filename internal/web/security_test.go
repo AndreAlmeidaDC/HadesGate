@@ -129,3 +129,29 @@ func TestSecurityMiddleware_DefaultDenyAndRejectsDisallowedPrivatePreflight(t *t
 		t.Fatalf("private-network access was exposed to a rejected origin: %q", got)
 	}
 }
+
+func TestSecurityPolicy_HotReloadsCORSOrigins(t *testing.T) {
+	policy := NewSecurityPolicy([]string{"https://old.example"})
+	handler := policy.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	request := func(origin string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodOptions, "/api/config", nil)
+		req.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+
+	if got := request("https://new.example"); got.Code != http.StatusForbidden {
+		t.Fatalf("new origin was allowed before reload: status=%d", got.Code)
+	}
+	policy.UpdateAllowedOrigins([]string{"https://new.example"})
+	if got := request("https://new.example"); got.Code != http.StatusNoContent || got.Header().Get("Access-Control-Allow-Origin") != "https://new.example" {
+		t.Fatalf("new origin was not allowed after reload: status=%d headers=%v", got.Code, got.Header())
+	}
+	if got := request("https://old.example"); got.Code != http.StatusForbidden {
+		t.Fatalf("old origin remained allowed after atomic reload: status=%d", got.Code)
+	}
+}

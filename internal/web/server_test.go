@@ -29,7 +29,7 @@ func setupTestServer(adminKey string) (*Server, *http.ServeMux) {
 		Webhook: wh,
 	})
 	srv := NewServer(eng, gw, adminKey, nil)
-	store, _ := config.NewStore(traces.DB())
+	store, _ := config.NewStore(traces.DB(), []byte("0123456789abcdef0123456789abcdef"))
 	srv.SetStore(store)
 	srv.SetWebhook(wh)
 
@@ -178,7 +178,7 @@ func TestServer_GlobalProxyKeyCannotAccessAdminEndpoints(t *testing.T) {
 		GlobalProxyKey: globalProxyKey,
 	})
 	srv := NewServer(eng, gw, adminKey, nil)
-	store, err := config.NewStore(traces.DB())
+	store, err := config.NewStore(traces.DB(), []byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("creating config store: %v", err)
 	}
@@ -646,6 +646,73 @@ func TestServer_DynamicConfigAndTenants(t *testing.T) {
 	}
 }
 
+func TestServer_ConfigurationSecretsAreWriteOnly(t *testing.T) {
+	const adminKey = "admin-secret-key"
+	const globalKey = "sec_HG_global_must_not_be_returned"
+	const webhookSecret = "webhook_secret_must_not_be_returned"
+	const webhookURL = "https://hooks.example.test/must-not-be-returned"
+	const tenantKey = "sec_HG_tenant_must_not_be_returned"
+	srv, mux := setupTestServer(adminKey)
+	if err := srv.store.SaveDynamicConfig(context.Background(), config.DynamicConfig{
+		GlobalProxyKey: globalKey,
+		WebhookURL:     webhookURL,
+		WebhookSecret:  webhookSecret,
+	}); err != nil {
+		t.Fatalf("saving dynamic config: %v", err)
+	}
+	if _, err := srv.store.SaveTenant(context.Background(), config.TenantConfig{
+		ID: "01", Name: "Financeiro", ProxyKey: tenantKey,
+	}); err != nil {
+		t.Fatalf("saving tenant: %v", err)
+	}
+
+	for _, path := range []string{"/api/config", "/api/tenants"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+adminKey)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", path, w.Code, w.Body.String())
+		}
+		body := w.Body.String()
+		if strings.Contains(body, globalKey) || strings.Contains(body, webhookURL) || strings.Contains(body, webhookSecret) || strings.Contains(body, tenantKey) {
+			t.Fatalf("GET %s exposed write-only secret material: %s", path, body)
+		}
+		if !strings.Contains(body, "configured") {
+			t.Fatalf("GET %s did not report secret configuration state: %s", path, body)
+		}
+	}
+
+	configUpdate := `{"entity_actions":{},"global_proxy_key":"","webhook_secret":"","webhook_url":"","webhook_events":[]}`
+	configReq := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(configUpdate))
+	configReq.Header.Set("Authorization", "Bearer "+adminKey)
+	configReq.Header.Set("Content-Type", "application/json")
+	configW := httptest.NewRecorder()
+	mux.ServeHTTP(configW, configReq)
+	if configW.Code != http.StatusOK {
+		t.Fatalf("write-only config update failed: %d %s", configW.Code, configW.Body.String())
+	}
+
+	tenantUpdate := `{"original_id":"01","id":"01","name":"Financeiro Atualizado","proxy_key":"","rate_limit":50,"entity_actions":{}}`
+	tenantReq := httptest.NewRequest(http.MethodPut, "/api/tenants", strings.NewReader(tenantUpdate))
+	tenantReq.Header.Set("Authorization", "Bearer "+adminKey)
+	tenantReq.Header.Set("Content-Type", "application/json")
+	tenantW := httptest.NewRecorder()
+	mux.ServeHTTP(tenantW, tenantReq)
+	if tenantW.Code != http.StatusOK {
+		t.Fatalf("write-only tenant update failed: %d %s", tenantW.Code, tenantW.Body.String())
+	}
+
+	persistedCfg, err := srv.store.GetDynamicConfig(context.Background())
+	if err != nil || persistedCfg.GlobalProxyKey != globalKey || persistedCfg.WebhookURL != webhookURL || persistedCfg.WebhookSecret != webhookSecret {
+		t.Fatalf("blank write-only config fields erased secrets: cfg=%+v err=%v", persistedCfg, err)
+	}
+	persistedTenants, err := srv.store.ListTenants(context.Background())
+	if err != nil || len(persistedTenants) != 1 || persistedTenants[0].ProxyKey != tenantKey {
+		t.Fatalf("blank write-only tenant field erased secret: tenants=%+v err=%v", persistedTenants, err)
+	}
+}
+
 func TestServer_ProviderCredentialLifecycle(t *testing.T) {
 	const (
 		adminKey       = "admin-secret-key"
@@ -738,5 +805,31 @@ func TestServer_AnvisaEndpoints(t *testing.T) {
 	}
 	if status.TermsCount < 20000 {
 		t.Errorf("expected >= 20000 terms in status, got %d", status.TermsCount)
+	}
+}
+
+func TestServer_ConfigUpdateHotReloadsCORS(t *testing.T) {
+	const adminKey = "admin-secret-key"
+	srv, mux := setupTestServer(adminKey)
+	policy := NewSecurityPolicy([]string{"https://old.example"})
+	srv.SetSecurityPolicy(policy)
+
+	body := `{"entity_actions":{},"cors_allowed_origins":["https://new.example"],"webhook_events":[]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+adminKey)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("updating CORS config: status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	handler := policy.Handler(mux)
+	preflight := httptest.NewRequest(http.MethodOptions, "/api/config", nil)
+	preflight.Header.Set("Origin", "https://new.example")
+	preflightW := httptest.NewRecorder()
+	handler.ServeHTTP(preflightW, preflight)
+	if preflightW.Code != http.StatusNoContent || preflightW.Header().Get("Access-Control-Allow-Origin") != "https://new.example" {
+		t.Fatalf("CORS update was not applied without restart: status=%d headers=%v", preflightW.Code, preflightW.Header())
 	}
 }

@@ -2,10 +2,12 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,6 +170,30 @@ func TestResolveTarget(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpstreamDispatcher_RuntimeConfigUpdatesAreAtomic(t *testing.T) {
+	dispatcher := NewUpstreamDispatcher(UpstreamConfig{OllamaBaseURL: "http://localhost:11434/v1"})
+	var wg sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for iteration := 0; iteration < 500; iteration++ {
+				if id%2 == 0 {
+					dispatcher.SetEnableEgressScan(iteration%2 == 0)
+					dispatcher.SetOllamaBaseURL(fmt.Sprintf("http://127.0.0.1:%d/v1", 11434+iteration%2))
+					continue
+				}
+				target := dispatcher.ResolveLocalTarget("/chat/completions")
+				if !strings.HasSuffix(target, "/v1/chat/completions") {
+					t.Errorf("observed partial runtime configuration: %q", target)
+					return
+				}
+			}
+		}(worker)
+	}
+	wg.Wait()
 }
 
 func TestResolveTargetRejectsAllowlistedPrivateAddressByDefault(t *testing.T) {

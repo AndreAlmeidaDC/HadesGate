@@ -48,20 +48,126 @@ type ProviderCredential struct {
 
 // Store persists dynamic configurations in SQLite.
 type Store struct {
-	db *sql.DB
-	mu sync.Mutex
+	db      *sql.DB
+	mu      sync.Mutex
+	secrets *secretCipher
 }
 
 // NewStore initializes the store and creates necessary SQLite tables.
-func NewStore(db *sql.DB) (*Store, error) {
+func NewStore(db *sql.DB, masterKey []byte) (*Store, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database connection is nil")
 	}
-	s := &Store{db: db}
+	secrets, err := newSecretCipher(masterKey)
+	if err != nil {
+		return nil, err
+	}
+	s := &Store{db: db, secrets: secrets}
 	if err := s.initSchema(context.Background()); err != nil {
 		return nil, err
 	}
+	if err := s.migrateAndValidateSecrets(context.Background()); err != nil {
+		return nil, fmt.Errorf("initializing encrypted configuration: %w", err)
+	}
 	return s, nil
+}
+
+func (s *Store) migrateAndValidateSecrets(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, "PRAGMA secure_delete = ON"); err != nil {
+		return fmt.Errorf("enabling secure delete for secret migration: %w", err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	migratedPlaintext := false
+
+	type systemValue struct{ key, value string }
+	var systemValues []systemValue
+	rows, err := tx.QueryContext(ctx, "SELECT key, value FROM system_config WHERE key IN ('global_proxy_key', 'webhook_url', 'webhook_secret')")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var item systemValue
+		if err := rows.Scan(&item.key, &item.value); err != nil {
+			rows.Close()
+			return err
+		}
+		systemValues = append(systemValues, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range systemValues {
+		if item.value == "" {
+			continue
+		}
+		if strings.HasPrefix(item.value, encryptedSecretPrefix) {
+			if _, err := s.secrets.decrypt(item.value, systemSecretAAD(item.key)); err != nil {
+				return fmt.Errorf("validating %s: %w", item.key, err)
+			}
+			continue
+		}
+		encrypted, err := s.secrets.encrypt(item.value, systemSecretAAD(item.key))
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE system_config SET value = ? WHERE key = ?", encrypted, item.key); err != nil {
+			return err
+		}
+		migratedPlaintext = true
+	}
+
+	type tenantValue struct{ id, value string }
+	var tenantValues []tenantValue
+	rows, err = tx.QueryContext(ctx, "SELECT id, proxy_key FROM tenants")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var item tenantValue
+		if err := rows.Scan(&item.id, &item.value); err != nil {
+			rows.Close()
+			return err
+		}
+		tenantValues = append(tenantValues, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range tenantValues {
+		if item.value == "" {
+			continue
+		}
+		if strings.HasPrefix(item.value, encryptedSecretPrefix) {
+			if _, err := s.secrets.decrypt(item.value, tenantSecretAAD(item.id)); err != nil {
+				return fmt.Errorf("validating tenant %s proxy key: %w", item.id, err)
+			}
+			continue
+		}
+		encrypted, err := s.secrets.encrypt(item.value, tenantSecretAAD(item.id))
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE tenants SET proxy_key = ? WHERE id = ?", encrypted, item.id); err != nil {
+			return err
+		}
+		migratedPlaintext = true
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if migratedPlaintext {
+		if _, err := s.db.ExecContext(ctx, "VACUUM"); err != nil {
+			return fmt.Errorf("vacuuming legacy plaintext pages: %w", err)
+		}
+		if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+			return fmt.Errorf("truncating legacy plaintext WAL: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) initSchema(ctx context.Context) error {
@@ -163,11 +269,20 @@ func (s *Store) GetDynamicConfig(ctx context.Context) (DynamicConfig, error) {
 		case "entity_actions":
 			_ = json.Unmarshal([]byte(v), &cfg.EntityActions)
 		case "global_proxy_key":
-			cfg.GlobalProxyKey = v
+			cfg.GlobalProxyKey, err = s.secrets.decrypt(v, systemSecretAAD(k))
+			if err != nil {
+				return DynamicConfig{}, fmt.Errorf("decrypting global proxy key: %w", err)
+			}
 		case "webhook_url":
-			cfg.WebhookURL = v
+			cfg.WebhookURL, err = s.secrets.decrypt(v, systemSecretAAD(k))
+			if err != nil {
+				return DynamicConfig{}, fmt.Errorf("decrypting webhook URL: %w", err)
+			}
 		case "webhook_secret":
-			cfg.WebhookSecret = v
+			cfg.WebhookSecret, err = s.secrets.decrypt(v, systemSecretAAD(k))
+			if err != nil {
+				return DynamicConfig{}, fmt.Errorf("decrypting webhook secret: %w", err)
+			}
 		case "webhook_events":
 			if v != "" {
 				cfg.WebhookEvents = strings.Split(v, ",")
@@ -202,12 +317,25 @@ func (s *Store) saveDynamicConfigLocked(ctx context.Context, cfg DynamicConfig) 
 
 	actionsJSON, _ := json.Marshal(cfg.EntityActions)
 	now := time.Now().UTC()
+	globalProxyKey, err := s.encryptedSystemSecret(ctx, tx, "global_proxy_key", strings.TrimSpace(cfg.GlobalProxyKey))
+	if err != nil {
+		return err
+	}
+	webhookSecret, err := s.encryptedSystemSecret(ctx, tx, "webhook_secret", strings.TrimSpace(cfg.WebhookSecret))
+	if err != nil {
+		return err
+	}
+
+	webhookURL, err := s.encryptedSystemSecret(ctx, tx, "webhook_url", strings.TrimSpace(cfg.WebhookURL))
+	if err != nil {
+		return err
+	}
 
 	items := map[string]string{
 		"entity_actions":       string(actionsJSON),
-		"global_proxy_key":     cfg.GlobalProxyKey,
-		"webhook_url":          cfg.WebhookURL,
-		"webhook_secret":       cfg.WebhookSecret,
+		"global_proxy_key":     globalProxyKey,
+		"webhook_url":          webhookURL,
+		"webhook_secret":       webhookSecret,
 		"webhook_events":       strings.Join(cfg.WebhookEvents, ","),
 		"enable_egress_scan":   fmt.Sprintf("%t", cfg.EnableEgressScan),
 		"ollama_base_url":      cfg.OllamaBaseURL,
@@ -233,6 +361,21 @@ func (s *Store) saveDynamicConfigLocked(ctx context.Context, cfg DynamicConfig) 
 	return tx.Commit()
 }
 
+func (s *Store) encryptedSystemSecret(ctx context.Context, tx *sql.Tx, key, plaintext string) (string, error) {
+	if plaintext != "" {
+		return s.secrets.encrypt(plaintext, systemSecretAAD(key))
+	}
+	var existing string
+	err := tx.QueryRowContext(ctx, "SELECT value FROM system_config WHERE key = ?", key).Scan(&existing)
+	if err == nil {
+		return existing, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("reading existing %s: %w", key, err)
+	}
+	return "", nil
+}
+
 // ListTenants retrieves all configured tenants from SQLite.
 func (s *Store) ListTenants(ctx context.Context) ([]TenantConfig, error) {
 	s.mu.Lock()
@@ -250,6 +393,10 @@ func (s *Store) ListTenants(ctx context.Context) ([]TenantConfig, error) {
 		var actionsRaw string
 		if err := rows.Scan(&t.ID, &t.Name, &t.ProxyKey, &t.RateLimit, &actionsRaw, &t.UpdatedAt); err != nil {
 			return nil, err
+		}
+		t.ProxyKey, err = s.secrets.decrypt(t.ProxyKey, tenantSecretAAD(t.ID))
+		if err != nil {
+			return nil, fmt.Errorf("decrypting tenant %s proxy key: %w", t.ID, err)
 		}
 		t.EntityActions = make(map[string]string)
 		_ = json.Unmarshal([]byte(actionsRaw), &t.EntityActions)
@@ -281,15 +428,20 @@ func (s *Store) UpdateTenant(ctx context.Context, originalID string, tenant Tena
 	}
 
 	now := time.Now().UTC()
+	tenant.UpdatedAt = now
 	actionsJSON, _ := json.Marshal(tenant.EntityActions)
 
 	if originalID == "" || originalID == tenant.ID {
+		encryptedProxyKey, err := s.encryptedTenantSecret(ctx, tenant.ID, tenant.ProxyKey)
+		if err != nil {
+			return err
+		}
 		query := `
 			UPDATE tenants
 			SET name = ?, proxy_key = ?, rate_limit = ?, entity_actions = ?, updated_at = ?
 			WHERE id = ?
 		`
-		res, err := s.db.ExecContext(ctx, query, tenant.Name, tenant.ProxyKey, tenant.RateLimit, string(actionsJSON), now, tenant.ID)
+		res, err := s.db.ExecContext(ctx, query, tenant.Name, encryptedProxyKey, tenant.RateLimit, string(actionsJSON), now, tenant.ID)
 		if err != nil {
 			return fmt.Errorf("updating tenant: %w", err)
 		}
@@ -310,13 +462,28 @@ func (s *Store) UpdateTenant(ctx context.Context, originalID string, tenant Tena
 	if count > 0 {
 		return fmt.Errorf("tenant with ID %q already exists", tenant.ID)
 	}
+	plaintextProxyKey := tenant.ProxyKey
+	if plaintextProxyKey == "" {
+		var existing string
+		if err := s.db.QueryRowContext(ctx, "SELECT proxy_key FROM tenants WHERE id = ?", originalID).Scan(&existing); err != nil {
+			return fmt.Errorf("reading tenant %q proxy key: %w", originalID, err)
+		}
+		plaintextProxyKey, err = s.secrets.decrypt(existing, tenantSecretAAD(originalID))
+		if err != nil {
+			return fmt.Errorf("decrypting tenant %q proxy key: %w", originalID, err)
+		}
+	}
+	encryptedProxyKey, err := s.secrets.encrypt(plaintextProxyKey, tenantSecretAAD(tenant.ID))
+	if err != nil {
+		return err
+	}
 
 	query := `
 		UPDATE tenants
 		SET id = ?, name = ?, proxy_key = ?, rate_limit = ?, entity_actions = ?, updated_at = ?
 		WHERE id = ?
 	`
-	res, err := s.db.ExecContext(ctx, query, tenant.ID, tenant.Name, tenant.ProxyKey, tenant.RateLimit, string(actionsJSON), now, originalID)
+	res, err := s.db.ExecContext(ctx, query, tenant.ID, tenant.Name, encryptedProxyKey, tenant.RateLimit, string(actionsJSON), now, originalID)
 	if err != nil {
 		return fmt.Errorf("updating tenant ID: %w", err)
 	}
@@ -356,7 +523,12 @@ func (s *Store) saveTenantLocked(ctx context.Context, tenant TenantConfig) (Tena
 	}
 
 	now := time.Now().UTC()
+	tenant.UpdatedAt = now
 	actionsJSON, _ := json.Marshal(tenant.EntityActions)
+	encryptedProxyKey, err := s.encryptedTenantSecret(ctx, tenant.ID, tenant.ProxyKey)
+	if err != nil {
+		return tenant, err
+	}
 
 	query := `
 		INSERT INTO tenants (id, name, proxy_key, rate_limit, entity_actions, updated_at)
@@ -368,8 +540,23 @@ func (s *Store) saveTenantLocked(ctx context.Context, tenant TenantConfig) (Tena
 			entity_actions = excluded.entity_actions,
 			updated_at = excluded.updated_at
 	`
-	_, err := s.db.ExecContext(ctx, query, tenant.ID, tenant.Name, tenant.ProxyKey, tenant.RateLimit, string(actionsJSON), now)
+	_, err = s.db.ExecContext(ctx, query, tenant.ID, tenant.Name, encryptedProxyKey, tenant.RateLimit, string(actionsJSON), now)
 	return tenant, err
+}
+
+func (s *Store) encryptedTenantSecret(ctx context.Context, id, plaintext string) (string, error) {
+	if plaintext != "" {
+		return s.secrets.encrypt(plaintext, tenantSecretAAD(id))
+	}
+	var existing string
+	err := s.db.QueryRowContext(ctx, "SELECT proxy_key FROM tenants WHERE id = ?", id).Scan(&existing)
+	if err == nil {
+		return existing, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", fmt.Errorf("reading existing tenant proxy key: %w", err)
+	}
+	return "", fmt.Errorf("tenant proxy key is required")
 }
 
 // DeleteTenant deletes a tenant by ID.

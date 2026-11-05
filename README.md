@@ -113,7 +113,7 @@ sequenceDiagram
 ```bash
 git clone https://github.com/<seu-usuario>/hadesgate.git
 cd hadesgate
-cp .env.example .env        # defina HADESGATE_ADMIN_KEY e as chaves dos provedores
+cp .env.example .env        # defina HADESGATE_ADMIN_KEY, HADESGATE_CONFIG_MASTER_KEY e provedores
 docker compose up -d --build
 ```
 
@@ -121,10 +121,13 @@ docker compose up -d --build
 
 ```bash
 docker build -t hadesgate:latest .
+# Gere uma vez, guarde em um cofre e reutilize nas recriações do container.
+export HADESGATE_CONFIG_MASTER_KEY="$(openssl rand -base64 32)"
 docker run -d --name hadesgate -p 8080:8080 \
   -v hadesgate_data:/app/data \
   -e HADESGATE_BIND_ADDRESS=0.0.0.0 \
   -e HADESGATE_ADMIN_KEY=troque_esta_chave \
+  -e HADESGATE_CONFIG_MASTER_KEY \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   hadesgate:latest
 ```
@@ -342,6 +345,7 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 | `HADESGATE_ADMIN_KEY` | *gerada* | Chave do dashboard e da API |
 | `HADESGATE_PROXY_KEY` | *gerada separadamente* | Chave opcional para clientes gerenciados; nunca concede acesso administrativo |
 | `HADESGATE_FINGERPRINT_SECRET` | — | Segredo HMAC estável para identificar chaves BYOK sem persistir o valor original |
+| `HADESGATE_CONFIG_MASTER_KEY` | **obrigatória** | Chave externa de 32 bytes (base64/hex) para AES-256-GCM dos segredos no SQLite |
 | `HADESGATE_ALLOW_LEGACY_URL_KEYS` | `false` | Reativa temporariamente `/p/{key}` e `/t/{proxy_key}` durante migrações |
 | `HADESGATE_CORS_ALLOWED_ORIGINS` | — | Origens cross-origin confiáveis; vazio nega CORS por padrão |
 | `HADESGATE_ENABLE_EGRESS_SCAN` | `false` | Mascara novos dados sensíveis em respostas JSON e streams SSE |
@@ -369,6 +373,9 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 
 > [!CAUTION]
 > A ação `disabled` desliga o DLP para a entidade ou macro-família selecionada: o valor não é detectado, tokenizado, contabilizado nem bloqueado e pode seguir em texto puro ao provedor. Use somente quando esse comportamento for intencional. Uma regra específica do tenant pode sobrescrever a global; `inherit` mantém a regra global. Para preservar o Zero-PII, a telemetria não persiste o prompt sanitizado enquanto a política efetiva tiver qualquer ação `disabled`.
+
+> [!IMPORTANT]
+> `HADESGATE_CONFIG_MASTER_KEY` nunca é persistida no SQLite. Na primeira inicialização com a chave, segredos legados em plaintext são migrados para envelopes `enc:v1` AES-256-GCM. Faça backup seguro da chave: uma chave diferente ou ciphertext adulterado faz o armazenamento falhar de forma segura. As APIs e o Console tratam chaves de proxy, URL e segredo de webhook como write-only; valores atuais nunca são devolvidos.
 
 Upstreams dinâmicos passam por resolução DNS/IP em cada nova conexão e o socket é aberto diretamente no IP validado, evitando DNS rebinding. Endereços link-local, metadata, multicast, não especificados e faixas reservadas permanecem bloqueados mesmo com opt-in para redes privadas. Redirecionamentos HTTP de upstream são rejeitados.
 
