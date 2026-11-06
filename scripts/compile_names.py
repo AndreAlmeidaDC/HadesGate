@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-compile_names.py compiles name_ranking.parquet (~330,000 records) into
+compile_names.py compiles a Parquet name-ranking dataset into
 internal/anonymizer/detector/name_catalog.gz for HadesGate's deterministic PERSON detector.
 
 Binary file layout (HGNM format):
@@ -65,10 +65,15 @@ def compile_catalog(parquet_path: str, output_path: str):
     print(f"Success! Output size: {size_mb:.2f} MB ({os.path.getsize(output_path)} bytes)")
 
 if __name__ == "__main__":
-    src = "name_ranking.parquet"
+    if len(sys.argv) < 2:
+        print(
+            f"Usage: {os.path.basename(sys.argv[0])} <source.parquet> [output.gz]",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    src = sys.argv[1]
     dst = "internal/anonymizer/detector/name_catalog.gz"
-    if len(sys.argv) > 1:
-        src = sys.argv[1]
     if len(sys.argv) > 2:
         dst = sys.argv[2]
     compile_catalog(src, dst)
