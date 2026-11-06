@@ -977,13 +977,13 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
 
           {/* Family Filters Bar */}
           <div className="flex flex-wrap items-center gap-1.5 p-2 bg-secondary/50 border border-border">
-            <span className="font-mono text-[10px] uppercase font-bold text-muted-foreground mr-1">
+            <span className="font-mono text-[10px] uppercase font-bold text-muted-foreground mr-1 whitespace-nowrap">
               [ FILTRO ]:
             </span>
             <button
               type="button"
               onClick={() => setSelectedFamilyFilter("ALL")}
-              className={`px-2.5 py-1 font-mono text-[11px] uppercase font-bold border transition-colors ${selectedFamilyFilter === "ALL"
+              className={`px-2.5 py-1 font-mono text-[11px] uppercase font-bold border transition-colors whitespace-nowrap ${selectedFamilyFilter === "ALL"
                 ? "border-purple-600 bg-purple-700 text-white"
                 : "border-border bg-secondary text-muted-foreground hover:text-foreground"
                 }`}
@@ -998,7 +998,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                   key={fam.id}
                   type="button"
                   onClick={() => setSelectedFamilyFilter(fam.id)}
-                  className={`px-2 py-1 font-mono text-[10px] uppercase font-bold border transition-colors ${isSelected
+                  className={`px-2 py-1 font-mono text-[10px] uppercase font-bold border transition-colors whitespace-nowrap ${isSelected
                     ? "border-purple-600 bg-purple-700 text-white"
                     : "border-border bg-secondary text-muted-foreground hover:text-foreground"
                     }`}
@@ -1025,47 +1025,48 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                   className="border-2 border-zinc-900 dark:border-[#38384A] bg-card p-4 space-y-3"
                 >
                   {/* Family Header */}
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-border pb-3">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="inline-block h-2 w-2 bg-purple-600" />
-                        <h3 className="font-mono text-xs font-bold uppercase text-foreground tracking-[0.08em]">
+                  <div className="border-b border-border pb-3 space-y-3">
+                    {/* Top Row: Family Identity & Description */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="inline-block h-2.5 w-2.5 bg-purple-600 shrink-0" />
+                        <h3 className="font-mono text-xs font-bold uppercase text-foreground tracking-[0.08em] whitespace-nowrap">
                           {fam.label}
                         </h3>
-                        <span className="px-1.5 py-0.5 border border-purple-500/40 bg-purple-950/20 text-purple-400 font-mono text-[9px] uppercase font-bold">
+                        <span className="px-1.5 py-0.5 border border-purple-500/40 bg-purple-950/20 text-purple-400 font-mono text-[9px] uppercase font-bold shrink-0">
                           {entitiesInFamily.length} {entitiesInFamily.length === 1 ? "ENTIDADE" : "ENTIDADES"}
                         </span>
                       </div>
-                      <p className="font-mono text-[10px] text-muted-foreground mt-0.5">
+                      <p className="font-mono text-[10px] text-muted-foreground">
                         {fam.description}
                       </p>
                     </div>
 
-                    {/* Batch Actions & Family Confidence Controls */}
-                    <div className="flex flex-wrap items-center gap-3">
+                    {/* Bottom Row: Batch Controls Toolbar */}
+                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 p-2.5 bg-secondary/30 border border-border/60">
                       {/* Batch Action Buttons */}
-                      <div className="flex items-center gap-1">
-                        <span className="font-mono text-[9px] text-muted-foreground uppercase mr-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-mono text-[9px] text-muted-foreground uppercase font-bold mr-1 whitespace-nowrap">
                           {t.settings.familyBatchAction}:
                         </span>
                         <button
                           type="button"
                           onClick={() => handleFamilyBatchAction(fam.id, "mask")}
-                          className="px-2 h-6 border border-purple-600 bg-purple-700/20 hover:bg-purple-700 text-purple-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                          className="px-2 h-6 border border-purple-600/70 bg-purple-950/30 hover:bg-purple-700 text-purple-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors whitespace-nowrap"
                         >
                           {t.settings.setAllMask}
                         </button>
                         <button
                           type="button"
                           onClick={() => handleFamilyBatchAction(fam.id, "block")}
-                          className="px-2 h-6 border border-red-600 bg-red-700/20 hover:bg-red-700 text-red-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                          className="px-2 h-6 border border-red-600/70 bg-red-950/30 hover:bg-red-700 text-red-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors whitespace-nowrap"
                         >
                           {t.settings.setAllBlock}
                         </button>
                         <button
                           type="button"
                           onClick={() => handleFamilyBatchAction(fam.id, "route_local")}
-                          className="px-2 h-6 border border-amber-600 bg-amber-700/20 hover:bg-amber-700 text-amber-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                          className="px-2 h-6 border border-amber-600/70 bg-amber-950/30 hover:bg-amber-700 text-amber-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors whitespace-nowrap"
                         >
                           {t.settings.setAllRouteLocal}
                         </button>
@@ -1073,7 +1074,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                           <button
                             type="button"
                             onClick={handleBatchContextualGlobal}
-                            className="px-2 h-6 border border-cyan-600 bg-cyan-700/20 hover:bg-cyan-700 text-cyan-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                            className="px-2 h-6 border border-cyan-600/70 bg-cyan-950/30 hover:bg-cyan-700 text-cyan-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors whitespace-nowrap"
                           >
                             {t.settings.setAllContextual}
                           </button>
@@ -1081,21 +1082,21 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                         <button
                           type="button"
                           onClick={() => handleFamilyBatchAction(fam.id, "disabled")}
-                          className="px-2 h-6 border border-red-500 bg-red-950/30 hover:bg-red-700 text-red-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                          className="px-2 h-6 border border-red-500/70 bg-red-950/50 hover:bg-red-700 text-red-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors whitespace-nowrap"
                         >
                           {t.settings.setAllDisabled}
                         </button>
                       </div>
 
                       {/* Family Confidence Slider */}
-                      <div className="flex items-center gap-2 border-l border-border pl-3">
-                        <div className="flex flex-col">
-                          <div className="flex items-center justify-between text-[9px] font-mono uppercase text-muted-foreground">
-                            <span>{t.settings.familyConfidence}:</span>
-                            <span className="font-bold text-purple-400 ml-1">
-                              {(familyThreshold * 100).toFixed(0)}%
-                            </span>
-                          </div>
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 xl:border-l xl:border-border/60 xl:pl-3 shrink-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[9px] font-mono uppercase text-muted-foreground whitespace-nowrap">
+                            {t.settings.familyConfidence}:
+                          </span>
+                          <span className="font-mono text-[10px] font-bold text-purple-400 min-w-[28px] text-right">
+                            {(familyThreshold * 100).toFixed(0)}%
+                          </span>
                           <input
                             type="range"
                             min="0.50"
@@ -1105,13 +1106,13 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                             onChange={(e) =>
                               handleFamilyThresholdChange(fam.id, parseFloat(e.target.value))
                             }
-                            className="w-28 h-1.5 bg-secondary accent-purple-600 cursor-pointer"
+                            className="w-24 h-1.5 bg-secondary accent-purple-600 cursor-pointer"
                           />
                         </div>
                         <button
                           type="button"
                           onClick={() => handleApplyFamilyThresholdToAll(fam.id)}
-                          className="px-2 h-6 border border-border bg-secondary hover:bg-secondary/80 text-[9px] font-mono uppercase font-bold text-foreground transition-colors whitespace-nowrap"
+                          className="px-2.5 h-6 border border-border bg-secondary hover:border-purple-600 text-[9px] font-mono uppercase font-bold text-foreground transition-colors whitespace-nowrap shrink-0"
                           title="Aplica este limiar como padrão herdado para todas as entidades desta família"
                         >
                           {t.settings.applyToAllInGroup}
@@ -1165,9 +1166,9 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="border-b border-border font-mono text-[10px] uppercase text-muted-foreground">
-                          <th className="py-2 px-3">{t.settings.entityColumn}</th>
-                          <th className="py-2 px-3">{t.settings.policyColumn}</th>
-                          <th className="py-2 px-3">{t.settings.customThreshold}</th>
+                          <th className="py-2 px-3 whitespace-nowrap">{t.settings.entityColumn}</th>
+                          <th className="py-2 px-3 whitespace-nowrap">{t.settings.policyColumn}</th>
+                          <th className="py-2 px-3 whitespace-nowrap">{t.settings.customThreshold}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border font-mono text-xs">
@@ -1730,38 +1731,45 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                     if (entitiesInFamily.length === 0) return null;
 
                     return (
-                      <div key={fam.id} className="border border-border/60 bg-card p-3 space-y-2">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/40 pb-1.5">
-                          <span className="font-mono text-[11px] font-bold text-foreground">
-                            {fam.label} ({entitiesInFamily.length})
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <span className="font-mono text-[9px] text-muted-foreground mr-1">LOTE:</span>
+                      <div key={fam.id} className="border border-border/60 bg-card p-3 space-y-2.5">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-border/40 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-[11px] font-bold text-foreground whitespace-nowrap">
+                              {fam.label}
+                            </span>
+                            <span className="px-1.5 py-0.2 border border-purple-500/40 bg-purple-950/20 text-purple-400 font-mono text-[9px] uppercase font-bold shrink-0">
+                              {entitiesInFamily.length} {entitiesInFamily.length === 1 ? "ENTIDADE" : "ENTIDADES"}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="font-mono text-[9px] text-muted-foreground uppercase font-bold mr-1 whitespace-nowrap">
+                              {t.settings.familyBatchAction || "LOTE"}:
+                            </span>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "inherit")}
-                              className="px-1.5 h-5 border border-border bg-secondary text-[9px] font-mono uppercase text-muted-foreground hover:text-foreground"
+                              className="px-2 h-5 border border-border bg-secondary text-[9px] font-mono uppercase text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
                             >
                               {t.settings.inheritGlobal}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "mask")}
-                              className="px-1.5 h-5 border border-purple-600/50 bg-purple-700/20 text-[9px] font-mono uppercase text-purple-300 hover:text-white"
+                              className="px-2 h-5 border border-purple-600/50 bg-purple-700/20 text-[9px] font-mono uppercase text-purple-300 hover:text-white transition-colors whitespace-nowrap"
                             >
                               {t.settings.mask}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "block")}
-                              className="px-1.5 h-5 border border-red-600/50 bg-red-700/20 text-[9px] font-mono uppercase text-red-300 hover:text-white"
+                              className="px-2 h-5 border border-red-600/50 bg-red-700/20 text-[9px] font-mono uppercase text-red-300 hover:text-white transition-colors whitespace-nowrap"
                             >
                               {t.settings.block}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "route_local")}
-                              className="px-1.5 h-5 border border-amber-600/50 bg-amber-700/20 text-[9px] font-mono uppercase text-amber-300 hover:text-white"
+                              className="px-2 h-5 border border-amber-600/50 bg-amber-700/20 text-[9px] font-mono uppercase text-amber-300 hover:text-white transition-colors whitespace-nowrap"
                             >
                               {t.settings.routeLocal}
                             </button>
@@ -1769,7 +1777,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                               <button
                                 type="button"
                                 onClick={handleBatchContextualTenant}
-                                className="px-1.5 h-5 border border-cyan-600/50 bg-cyan-700/20 text-[9px] font-mono uppercase text-cyan-300 hover:text-white"
+                                className="px-2 h-5 border border-cyan-600/50 bg-cyan-700/20 text-[9px] font-mono uppercase text-cyan-300 hover:text-white transition-colors whitespace-nowrap"
                               >
                                 {t.settings.contextual}
                               </button>
@@ -1777,7 +1785,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "disabled")}
-                              className="px-1.5 h-5 border border-red-500 bg-red-950/30 text-[9px] font-mono uppercase text-red-300 hover:text-white"
+                              className="px-2 h-5 border border-red-500 bg-red-950/30 text-[9px] font-mono uppercase text-red-300 hover:text-white transition-colors whitespace-nowrap"
                             >
                               {t.settings.setAllDisabled}
                             </button>

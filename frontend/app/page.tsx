@@ -231,7 +231,7 @@ export default function Home() {
               rel="noreferrer"
               className="font-bold text-purple-500 hover:text-purple-400 underline underline-offset-2"
             >
-              SOURCE // AGPL-3.0
+              GITHUB // SOURCE (AGPL-3.0)
             </a>
           </div>
         </div>

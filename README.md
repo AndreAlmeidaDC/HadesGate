@@ -24,6 +24,7 @@
 [Detectores](#-detectores) ·
 [Integrações](#-integrações) ·
 [Configuração](#%EF%B8%8F-configuração) ·
+[Apoie](#-apoie-o-hadesgate) ·
 [Roadmap](./docs/ROADMAP.md)
 
 </div>
@@ -460,6 +461,33 @@ O CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) valida um corpus
 ## 🗺️ Roadmap
 
 Veja o [ROADMAP completo](./docs/ROADMAP.md). Próximos passos incluem governança, retenção, resiliência operacional e expansão contínua dos cenários adversariais do corpus.
+
+---
+
+## 💜 Apoie o HadesGate
+
+Se o HadesGate ajuda seu projeto, você pode apoiar o desenvolvimento via PIX.
+
+<p align="center">
+  <img src="./docs/assets/pix-qr.png" alt="QR Code PIX para apoiar o HadesGate" width="240">
+</p>
+
+**Chave PIX (UUID) — clique no ícone de copiar do bloco:**
+
+```text
+276bec8f-d79f-48a2-813e-79218df9bce2
+```
+
+<details>
+<summary><strong>PIX Copia e Cola</strong></summary>
+
+```text
+00020101021126580014br.gov.bcb.pix0136276bec8f-d79f-48a2-813e-79218df9bce25204000053039865802BR5920RODOLFO D C BANDEIRA6011PEDRO VELHO62070503***6304AE0A
+```
+
+</details>
+
+Antes de confirmar, confira no aplicativo do banco o recebedor **RODOLFO D C BANDEIRA**.
 
 ---
 

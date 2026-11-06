@@ -10,6 +10,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ## [Unreleased]
 
 ### Adicionado (Added)
+- **Apoio ao projeto**:
+  - README passa a exibir QR Code PIX, chave UUID e payload PIX Copia e Cola em bloco copiável, com identificação do recebedor para conferência.
+  - Footer público e autenticado do Console identifica explicitamente o GitHub oficial do projeto.
 - **Licenciamento AGPL-3.0-only**:
   - Substituição da licença MIT legada pela GNU Affero General Public License v3.0 somente, com texto oficial integral.
   - Metadados SPDX, fórmulas Homebrew, README e Console alinhados; respostas HTTP passam a publicar a oferta de código-fonte por `Link` e a licença em `X-HadesGate-License`.
