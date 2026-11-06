@@ -9,6 +9,7 @@ bin/
 dist/
 
 # Embedded frontend build (keep .gitkeep so //go:embed all:dist always compiles)
+!internal/web/dist/
 internal/web/dist/*
 !internal/web/dist/.gitkeep
 
