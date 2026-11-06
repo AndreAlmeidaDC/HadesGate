@@ -154,6 +154,8 @@ const KNOWN_ENTITIES: KnownEntity[] = [
   { id: "CODICE_FISCALE", label: "Codice Fiscale (Identificador Fiscal Italiano)", family: "INTL" },
 ];
 
+const CONTEXTUAL_HEALTH_ENTITIES = new Set(["CID", "MEDICATION"]);
+
 function getActionColorClass(action: string): string {
   switch (action) {
     case "mask":
