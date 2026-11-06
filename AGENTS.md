@@ -77,7 +77,11 @@ Gateway reverso de privacidade Zero-PII em Go para APIs de LLM (OpenAI Chat Comp
 
 ## Git
 
-Traga `origin/main` antes de planejar mudanças grandes e antes de abrir PR.
+- **Nunca envie commits diretamente para a branch principal** (`main`, `master` ou equivalente), nem localmente nem no remoto. Todo trabalho deve ocorrer em uma branch dedicada.
+- **Toda alteração deve ser entregue por Pull Request.** Abra o PR com contexto, escopo, testes executados e riscos conhecidos; não faça merge do próprio PR sem autorização explícita de um mantenedor.
+- Quando não houver uma alteração pronta para revisão — por exemplo, para relatar bug, propor melhoria, registrar dúvida ou documentar bloqueio — **abra uma issue** em vez de deixar a demanda apenas em conversa informal.
+- Ao concluir o trabalho, informe o link do PR ou da issue correspondente. Trabalho de colaborador sem PR ou issue não é considerado entregue.
+- Traga `origin/main` antes de planejar mudanças grandes e antes de abrir PR.
 
 ## Em conflito
 
