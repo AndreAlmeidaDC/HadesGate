@@ -29,6 +29,9 @@ const (
 type Trace struct {
 	ID              string    `json:"id"`
 	Tenant          string    `json:"tenant,omitempty"`
+	TenantName      string    `json:"tenant_name,omitempty"`
+	UserLabel       string    `json:"user_label,omitempty"`
+	UserRole        string    `json:"user_role,omitempty"`
 	PolicyAction    string    `json:"policy_action,omitempty"`
 	Timestamp       time.Time `json:"timestamp"`
 	Provider        string    `json:"provider"`
@@ -146,6 +149,9 @@ CREATE TABLE IF NOT EXISTS audit_traces (
 	seq              INTEGER PRIMARY KEY AUTOINCREMENT,
 	id               TEXT NOT NULL UNIQUE,
 	tenant           TEXT NOT NULL DEFAULT '',
+	tenant_name      TEXT NOT NULL DEFAULT '',
+	user_label       TEXT NOT NULL DEFAULT '',
+	user_role        TEXT NOT NULL DEFAULT '',
 	policy_action    TEXT NOT NULL DEFAULT 'mask',
 	timestamp_unix   INTEGER NOT NULL,
 	timestamp_iso    TEXT NOT NULL,
@@ -172,6 +178,11 @@ CREATE TABLE IF NOT EXISTS telemetry_retention (
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("creating audit_traces schema: %w", err)
+	}
+
+	// Migrate existing audit_traces table if new columns are missing
+	for _, col := range []string{"tenant_name", "user_label", "user_role"} {
+		_, _ = db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE audit_traces ADD COLUMN %s TEXT NOT NULL DEFAULT '';", col))
 	}
 	return nil
 }
@@ -243,17 +254,20 @@ func (l *TraceLogger) RecordContext(ctx context.Context, t Trace) error {
 
 	const insertQuery = `
 INSERT OR REPLACE INTO audit_traces (
-	id, tenant, policy_action, timestamp_unix, timestamp_iso,
+	id, tenant, tenant_name, user_label, user_role, policy_action, timestamp_unix, timestamp_iso,
 	provider, model, language, stream, status_code,
 	duration_ms, anon_duration_us, entities_count,
 	entity_types, pii_types, secret_types, sanitized_prompt
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 	_, err := l.db.ExecContext(
 		ctx,
 		insertQuery,
 		t.ID,
 		t.Tenant,
+		t.TenantName,
+		t.UserLabel,
+		t.UserRole,
 		t.PolicyAction,
 		t.Timestamp.Unix(),
 		t.Timestamp.UTC().Format(time.RFC3339Nano),
@@ -355,7 +369,7 @@ func (l *TraceLogger) getPagedContext(ctx context.Context, limit, offset int, te
 
 	pagedQuery := `
 SELECT
-	id, tenant, policy_action, timestamp_iso, provider, model, language,
+	id, tenant, tenant_name, user_label, user_role, policy_action, timestamp_iso, provider, model, language,
 	stream, status_code, duration_ms, anon_duration_us, entities_count,
 	entity_types, pii_types, secret_types, sanitized_prompt
 FROM audit_traces
@@ -386,6 +400,9 @@ FROM audit_traces
 		if err := rows.Scan(
 			&t.ID,
 			&t.Tenant,
+			&t.TenantName,
+			&t.UserLabel,
+			&t.UserRole,
 			&t.PolicyAction,
 			&tsISO,
 			&t.Provider,
@@ -443,7 +460,7 @@ func (l *TraceLogger) GetAllContext(ctx context.Context) ([]Trace, error) {
 
 	const selectQuery = `
 SELECT
-	id, tenant, policy_action, timestamp_iso, provider, model, language,
+	id, tenant, tenant_name, user_label, user_role, policy_action, timestamp_iso, provider, model, language,
 	stream, status_code, duration_ms, anon_duration_us, entities_count,
 	entity_types, pii_types, secret_types, sanitized_prompt
 FROM audit_traces
@@ -469,6 +486,9 @@ LIMIT ?
 		if err := rows.Scan(
 			&t.ID,
 			&t.Tenant,
+			&t.TenantName,
+			&t.UserLabel,
+			&t.UserRole,
 			&t.PolicyAction,
 			&tsISO,
 			&t.Provider,

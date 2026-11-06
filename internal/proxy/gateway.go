@@ -36,6 +36,25 @@ type MetricsTracker struct {
 	AvgLatencyMicros uint64
 }
 
+// UserContext carries non-sensitive administrative user metadata for telemetry.
+type UserContext struct {
+	Label string
+	Role  string
+}
+
+type userCtxKey struct{}
+
+// ContextWithUser associates administrative / user metadata with the request context.
+func ContextWithUser(ctx context.Context, label, role string) context.Context {
+	return context.WithValue(ctx, userCtxKey{}, UserContext{Label: label, Role: role})
+}
+
+// UserFromContext extracts administrative / user metadata from the request context.
+func UserFromContext(ctx context.Context) (UserContext, bool) {
+	u, ok := ctx.Value(userCtxKey{}).(UserContext)
+	return u, ok
+}
+
 // Gateway handles OpenAI-compatible reverse proxy requests.
 type Gateway struct {
 	mu                        sync.RWMutex
@@ -48,6 +67,7 @@ type Gateway struct {
 	requestSlots              chan struct{}
 	policy                    *policy.Engine
 	tenantKeys                map[string]string
+	tenantNames               map[string]string
 	tenantPolicies            map[string]*policy.Engine
 	rateLimiters              map[string]*tokenBucketLimiter
 	providerKeyFingerprints   map[string][]string
@@ -61,6 +81,7 @@ type GatewayOptions struct {
 	GlobalProxyKey            string
 	EntityActions             map[string]string
 	TenantKeys                map[string]string
+	TenantNames               map[string]string
 	TenantEntityActions       map[string]map[string]string
 	RateLimitPerMinute        int
 	TenantRateLimits          map[string]int
@@ -157,6 +178,7 @@ func NewGatewayWithOptions(engine *anonymizer.Engine, upstream *UpstreamDispatch
 		requestSlots:              make(chan struct{}, maxConcurrent),
 		policy:                    policy.New(options.EntityActions).WithFamilyResolver(familyResolver),
 		tenantKeys:                cloneStringMap(options.TenantKeys),
+		tenantNames:               cloneStringMap(options.TenantNames),
 		tenantPolicies:            tenantPolicies,
 		rateLimiters:              rateLimiters,
 		providerKeyFingerprints:   cloneFingerprintMap(options.ProviderKeyFingerprints),
@@ -227,6 +249,34 @@ func (g *Gateway) GlobalProxyKey() string {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.globalProxyKey
+}
+
+// SetTenantNames sets the mapping of tenant IDs/slugs to human-readable names.
+func (g *Gateway) SetTenantNames(names map[string]string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.tenantNames = cloneStringMap(names)
+}
+
+// ResolveTenantName converts a tenant ID or slug to its configured name, or "GLOBAL".
+func (g *Gateway) ResolveTenantName(tenant string) string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" || tenant == "default" || tenant == "*" {
+		return "GLOBAL"
+	}
+	if name, ok := g.tenantNames[tenant]; ok && strings.TrimSpace(name) != "" {
+		return name
+	}
+	return tenant
+}
+
+func (g *Gateway) userForRequest(r *http.Request) UserContext {
+	if user, ok := UserFromContext(r.Context()); ok && user.Label != "" {
+		return user
+	}
+	return UserContext{}
 }
 
 func (g *Gateway) isGlobalKeyValid(key string) bool {
@@ -557,6 +607,7 @@ func (g *Gateway) anonymizeWithPolicy(sessionID, text string, tenantPolicy *poli
 		IsTypeDisabled: func(entityType detector.EntityType) bool {
 			return tenantPolicy.IsDisabled(string(entityType))
 		},
+		FilterMatches: tenantPolicy.FilterContextualMatches,
 	})
 }
 
@@ -754,6 +805,8 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	statusCode := http.StatusOK
 	var targetURL, apiKey string
 	isMock := true
+	userInfo := g.userForRequest(r)
+	tenantName := g.ResolveTenantName(tenant)
 
 	// Record non-sensitive anonymization trace on completion
 	defer func() {
@@ -761,6 +814,9 @@ func (g *Gateway) HandleChatCompletions(w http.ResponseWriter, r *http.Request) 
 			g.traces.Record(observability.Trace{
 				ID:              sessionID,
 				Tenant:          tenant,
+				TenantName:      tenantName,
+				UserLabel:       userInfo.Label,
+				UserRole:        userInfo.Role,
 				PolicyAction:    string(decision.Action),
 				Timestamp:       start,
 				Provider:        observability.InferProvider("chat", modelName, targetURL, isMock),

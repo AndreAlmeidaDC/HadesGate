@@ -1,6 +1,11 @@
 package policy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/hadesgate/hadesgate/internal/anonymizer/detector"
+)
 
 func TestDecisionPriority(t *testing.T) {
 	engine := New(map[string]string{"CPF": "route_local", "SECRET": "block"})
@@ -10,6 +15,68 @@ func TestDecisionPriority(t *testing.T) {
 	}
 	if len(decision.Types) != 2 {
 		t.Fatalf("unexpected policy types: %v", decision.Types)
+	}
+}
+
+func TestContextualHealthDefaultsAndExplicitOverrides(t *testing.T) {
+	defaults := New(nil)
+	if defaults.ActionFor("MEDICATION") != Contextual || defaults.ActionFor("CID") != Contextual {
+		t.Fatalf("health attributes must be contextual by default")
+	}
+	if defaults.ActionFor("MEDICAL_ID") != Mask || defaults.ActionFor("SUS_CARD") != Mask {
+		t.Fatalf("direct health identifiers must remain masked")
+	}
+	if New(map[string]string{"MEDICATION": "mask"}).ActionFor("MEDICATION") != Mask {
+		t.Fatal("explicit entity mask did not override contextual default")
+	}
+	if New(map[string]string{"CPF": "contextual"}).ActionFor("CPF") != Mask {
+		t.Fatal("unsupported contextual action must fail closed to mask")
+	}
+	unsupported := New(map[string]string{"CPF": "contextual", "PERSONAL": "block"}).WithFamilyResolver(func(string) string { return "PERSONAL" })
+	if unsupported.ActionFor("CPF") != Block {
+		t.Fatal("unsupported contextual entity action must not weaken a stricter family policy")
+	}
+	engine := New(map[string]string{"HEALTH_PHI": "block"}).WithFamilyResolver(func(entityType string) string { return "HEALTH_PHI" })
+	if engine.ActionFor("MEDICATION") != Block {
+		t.Fatal("explicit family action did not override contextual default")
+	}
+}
+
+func TestContextualHealthRequiresIdentityInSameSegment(t *testing.T) {
+	engine := New(nil)
+	medication := func(text string) detector.Match {
+		start := strings.Index(text, "Amoxicilina")
+		return detector.Match{Type: detector.EntityMedication, Value: "Amoxicilina", Start: start, End: start + len("Amoxicilina")}
+	}
+	person := func(text string) detector.Match {
+		start := strings.Index(text, "João Silva")
+		return detector.Match{Type: detector.EntityName, Value: "João Silva", Start: start, End: start + len("João Silva")}
+	}
+
+	standalone := "Crie uma receita de Amoxicilina 500mg."
+	if filtered := engine.FilterContextualMatches(standalone, []detector.Match{medication(standalone)}); len(filtered) != 0 {
+		t.Fatalf("standalone medication should pass through: %+v", filtered)
+	}
+	linked := "Paciente João Silva deve tomar Amoxicilina 500mg."
+	if filtered := engine.FilterContextualMatches(linked, []detector.Match{person(linked), medication(linked)}); len(filtered) != 2 {
+		t.Fatalf("linked medication must remain protected: %+v", filtered)
+	}
+	unrelated := "João Silva confirmou o cadastro. Explique Amoxicilina 500mg."
+	if filtered := engine.FilterContextualMatches(unrelated, []detector.Match{person(unrelated), medication(unrelated)}); len(filtered) != 1 || filtered[0].Type != detector.EntityName {
+		t.Fatalf("different sentence must not create a health link: %+v", filtered)
+	}
+
+	cid := func(text string) detector.Match {
+		start := strings.Index(text, "J45.0")
+		return detector.Match{Type: detector.EntityCID, Value: "J45.0", Start: start, End: start + len("J45.0")}
+	}
+	standaloneCID := "Explique o diagnóstico CID J45.0."
+	if filtered := engine.FilterContextualMatches(standaloneCID, []detector.Match{cid(standaloneCID)}); len(filtered) != 0 {
+		t.Fatalf("standalone CID should pass through: %+v", filtered)
+	}
+	linkedCID := "O diagnóstico de João Silva é CID J45.0."
+	if filtered := engine.FilterContextualMatches(linkedCID, []detector.Match{person(linkedCID), cid(linkedCID)}); len(filtered) != 2 {
+		t.Fatalf("linked CID must remain protected: %+v", filtered)
 	}
 }
 

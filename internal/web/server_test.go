@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1001,5 +1002,202 @@ func TestServer_PlaygroundProxy(t *testing.T) {
 	mux.ServeHTTP(mockW, mockReq)
 	if mockW.Code != http.StatusOK {
 		t.Fatalf("/api/playground/v1/chat/completions mock failed: got %d: %s", mockW.Code, mockW.Body.String())
+	}
+}
+
+func TestServer_WebhookValidationAndTesting(t *testing.T) {
+	const adminKey = "test-admin-secret-key"
+	srv, mux := setupTestServer(adminKey)
+
+	// 1. Invalid webhook URL (like an autofilled email) must be rejected with 400
+	invalidBody := `{"webhook_url":"trainer@fitflow.com"}`
+	req1 := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(invalidBody))
+	req1.Header.Set("Authorization", "Bearer "+adminKey)
+	w1 := httptest.NewRecorder()
+	mux.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid webhook URL, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// 2. Valid webhook URL must succeed and return preview
+	validBody := `{"webhook_url":"https://discord.com/api/webhooks/123/xyz"}`
+	req2 := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(validBody))
+	req2.Header.Set("Authorization", "Bearer "+adminKey)
+	w2 := httptest.NewRecorder()
+	mux.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid webhook URL, got %d: %s", w2.Code, w2.Body.String())
+	}
+	var res2 struct {
+		Config struct {
+			WebhookURLConfigured bool   `json:"webhook_url_configured"`
+			WebhookURLPreview    string `json:"webhook_url_preview"`
+		} `json:"config"`
+	}
+	_ = json.Unmarshal(w2.Body.Bytes(), &res2)
+	if !res2.Config.WebhookURLConfigured || res2.Config.WebhookURLPreview != "https://discord.com/*" {
+		t.Fatalf("unexpected webhook preview: %+v", res2.Config)
+	}
+
+	// 3. Test endpoint with a live test server
+	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer targetServer.Close()
+
+	testReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/test", strings.NewReader(fmt.Sprintf(`{"url":%q}`, targetServer.URL)))
+	testReq.Header.Set("Authorization", "Bearer "+adminKey)
+	testW := httptest.NewRecorder()
+	mux.ServeHTTP(testW, testReq)
+	if testW.Code != http.StatusOK {
+		t.Fatalf("expected 200 for test dispatch, got %d: %s", testW.Code, testW.Body.String())
+	}
+
+	// 4. Test endpoint with an invalid URL passed directly in body
+	badTestReq := httptest.NewRequest(http.MethodPost, "/api/webhooks/test", strings.NewReader(`{"url":"not-a-valid-url"}`))
+	badTestReq.Header.Set("Authorization", "Bearer "+adminKey)
+	badTestW := httptest.NewRecorder()
+	mux.ServeHTTP(badTestW, badTestReq)
+	if badTestW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad test url, got %d: %s", badTestW.Code, badTestW.Body.String())
+	}
+
+	// 5. Clear webhook with __CLEAR__
+	clearBody := `{"webhook_url":"__CLEAR__","webhook_secret":"__CLEAR__"}`
+	reqClear := httptest.NewRequest(http.MethodPut, "/api/config", strings.NewReader(clearBody))
+	reqClear.Header.Set("Authorization", "Bearer "+adminKey)
+	wClear := httptest.NewRecorder()
+	mux.ServeHTTP(wClear, reqClear)
+	if wClear.Code != http.StatusOK {
+		t.Fatalf("expected 200 for webhook clear, got %d: %s", wClear.Code, wClear.Body.String())
+	}
+	cfg, err := srv.store.GetDynamicConfig(context.Background())
+	if err != nil || cfg.WebhookURL != "" {
+		t.Fatalf("expected webhook URL cleared in store, got %q (err=%v)", cfg.WebhookURL, err)
+	}
+}
+
+func TestServer_AdminCredentialRotationOnlyByBootstrapAdmin(t *testing.T) {
+	const bootstrapKey = "bootstrap-master-admin-key"
+	srv, mux := setupTestServer(bootstrapKey)
+
+	// 1. Create an operational admin credential (role: admin, but not bootstrap)
+	opAdmin, err := srv.store.CreateAdminCredential(context.Background(), "Secondary Admin", config.RoleAdmin)
+	if err != nil {
+		t.Fatalf("creating secondary admin: %v", err)
+	}
+
+	// 2. Create an operator credential that will be rotated
+	targetCred, err := srv.store.CreateAdminCredential(context.Background(), "Operator Key", config.RoleOperator)
+	if err != nil {
+		t.Fatalf("creating operator key: %v", err)
+	}
+	oldSecret := targetCred.Secret
+
+	// 3. Attempt rotation using secondary admin (operational key) -> MUST be rejected with 403 Forbidden!
+	rotateBody := fmt.Sprintf(`{"key_id":%q}`, targetCred.KeyID)
+	reqForbidden := httptest.NewRequest(http.MethodPost, "/api/admin-credentials/rotate", strings.NewReader(rotateBody))
+	reqForbidden.Header.Set("Authorization", "Bearer "+opAdmin.Secret)
+	reqForbidden.Header.Set("Content-Type", "application/json")
+	wForbidden := httptest.NewRecorder()
+	mux.ServeHTTP(wForbidden, reqForbidden)
+	if wForbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden when operational admin rotates, got %d: %s", wForbidden.Code, wForbidden.Body.String())
+	}
+
+	// 4. Attempt rotation using root bootstrap key -> MUST succeed with 200 OK
+	reqSuccess := httptest.NewRequest(http.MethodPost, "/api/admin-credentials/rotate", strings.NewReader(rotateBody))
+	reqSuccess.Header.Set("Authorization", "Bearer "+bootstrapKey)
+	reqSuccess.Header.Set("Content-Type", "application/json")
+	wSuccess := httptest.NewRecorder()
+	mux.ServeHTTP(wSuccess, reqSuccess)
+	if wSuccess.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK when bootstrap rotates, got %d: %s", wSuccess.Code, wSuccess.Body.String())
+	}
+
+	var rotated config.AdminCredential
+	if err := json.NewDecoder(wSuccess.Body).Decode(&rotated); err != nil {
+		t.Fatalf("failed to decode rotated credential response: %v", err)
+	}
+	if rotated.Secret == "" || rotated.Secret == oldSecret {
+		t.Fatalf("expected new one-time secret, got %q", rotated.Secret)
+	}
+
+	// 5. Old secret must fail authentication
+	if _, ok := srv.store.AuthenticateAdminCredential(context.Background(), oldSecret); ok {
+		t.Fatal("old secret still authenticated after rotation")
+	}
+
+	// 6. New secret must authenticate
+	if cred, ok := srv.store.AuthenticateAdminCredential(context.Background(), rotated.Secret); !ok || cred.KeyID != targetCred.KeyID {
+		t.Fatalf("new secret failed to authenticate: %+v, ok=%v", cred, ok)
+	}
+}
+
+func TestServer_TelemetryEnrichment_TenantAndUser(t *testing.T) {
+	v := vault.NewMemoryVault(5 * time.Minute)
+	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+	traces := observability.NewTraceLogger(100)
+	t.Cleanup(func() { _ = traces.Close() })
+
+	gw := proxy.NewGatewayWithOptions(eng, nil, traces, proxy.GatewayOptions{
+		GlobalProxyKey: "proxy-key",
+		TenantKeys:     map[string]string{"t-fin": "fin-key"},
+		TenantNames:    map[string]string{"t-fin": "Financeiro"},
+	})
+	srv := NewServer(eng, gw, "admin-bootstrap-key", nil)
+	store, _ := config.NewStore(traces.DB(), []byte("0123456789abcdef0123456789abcdef"))
+	srv.SetStore(store)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// Record a trace without TenantName explicitly set
+	traces.Record(observability.Trace{
+		ID:        "trace-fin",
+		Tenant:    "t-fin",
+		UserLabel: "OPERADOR_1",
+		UserRole:  "OPERATOR",
+		Provider:  "openai",
+		Model:     "gpt-4o",
+	})
+	traces.Record(observability.Trace{
+		ID:        "trace-global",
+		Tenant:    "",
+		UserLabel: "BOOTSTRAP",
+		UserRole:  "ADMIN",
+		Provider:  "anthropic",
+		Model:     "claude-3-7-sonnet",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
+	req.Header.Set("Authorization", "Bearer admin-bootstrap-key")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /api/traces, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Traces []observability.Trace `json:"traces"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decoding /api/traces response: %v", err)
+	}
+
+	if len(resp.Traces) != 2 {
+		t.Fatalf("expected 2 traces, got %d", len(resp.Traces))
+	}
+
+	// First is newest: trace-global
+	globalTrace := resp.Traces[0]
+	if globalTrace.ID != "trace-global" || globalTrace.TenantName != "GLOBAL" || globalTrace.UserLabel != "BOOTSTRAP" || globalTrace.UserRole != "ADMIN" {
+		t.Errorf("unexpected global trace: %+v", globalTrace)
+	}
+
+	finTrace := resp.Traces[1]
+	if finTrace.ID != "trace-fin" || finTrace.TenantName != "Financeiro" || finTrace.UserLabel != "OPERADOR_1" || finTrace.UserRole != "OPERATOR" {
+		t.Errorf("unexpected tenant trace: %+v", finTrace)
 	}
 }

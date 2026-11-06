@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Play, RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -64,7 +64,37 @@ export function Playground({
   const t = translations[lang];
   const [prompt, setPrompt] = useState(PRESETS[0].prompt);
   const [model, setModel] = useState("mock");
+  const [selectedTenant, setSelectedTenant] = useState("");
+  const [availableTenants, setAvailableTenants] = useState<{ id: string; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const fetchTenants = async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+        const res = await fetch(`${gatewayUrl}/api/tenants`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          if (active && Array.isArray(data)) {
+            setAvailableTenants(
+              data.map((tItem: any) => ({
+                id: String(tItem.id),
+                name: String(tItem.name || tItem.id),
+              }))
+            );
+          }
+        }
+      } catch (err) {
+        // Ignored in offline / test environments
+      }
+    };
+    fetchTenants();
+    return () => {
+      active = false;
+    };
+  }, [gatewayUrl, apiKey]);
 
   const [sanitizedPrompt, setSanitizedPrompt] = useState("");
   const [detectedEntities, setDetectedEntities] = useState<any[]>([]);
@@ -91,11 +121,12 @@ export function Playground({
         "Content-Type": "application/json",
       };
       if (apiKey) inspectHeaders["Authorization"] = `Bearer ${apiKey}`;
+      if (selectedTenant) inspectHeaders["X-HadesGate-Tenant"] = selectedTenant;
 
       const inspectRes = await fetch(`${gatewayUrl}/api/test-anonymize`, {
         method: "POST",
         headers: inspectHeaders,
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, tenant: selectedTenant }),
       });
       if (inspectRes.ok) {
         const inspectData = await inspectRes.json();
@@ -117,6 +148,9 @@ export function Playground({
       };
       if (apiKey) {
         headers["Authorization"] = `Bearer ${apiKey}`;
+      }
+      if (selectedTenant) {
+        headers["X-HadesGate-Tenant"] = selectedTenant;
       }
 
       const isAnthropicModel = model.startsWith("claude-");
@@ -266,24 +300,42 @@ export function Playground({
             <span className="font-bold text-foreground">
               {t.playground.inputPayload}
             </span>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">{t.playground.targetModel}</span>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="h-8 bg-background border border-zinc-800 dark:border-[#3A3A4C] px-2.5 font-mono text-[11px] text-foreground focus:outline-none focus:border-purple-500"
-              >
-                <option value="mock">mock // HADESGATE_SIMULATOR</option>
-                <option value="claude-sonnet-4-6">anthropic // claude-sonnet-4-6</option>
-                <option value="claude-haiku-4-5-20251001">anthropic // claude-haiku-4-5</option>
-                <option value="claude-opus-4-6">anthropic // claude-opus-4-6</option>
-                <option value="gemini-2.5-flash">gemini // gemini-2.5-flash</option>
-                <option value="gemini-2.5-pro">gemini // gemini-2.5-pro</option>
-                <option value="gemini-2.0-flash">gemini // gemini-2.0-flash</option>
-                <option value="gpt-4o">openai // gpt-4o</option>
-                <option value="gpt-4o-mini">openai // gpt-4o-mini</option>
-                <option value="ollama/llama3">ollama // llama3</option>
-              </select>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">{lang === "pt-BR" ? "ESCOPO:" : "SCOPE:"}</span>
+                <select
+                  value={selectedTenant}
+                  onChange={(e) => setSelectedTenant(e.target.value)}
+                  className="h-8 bg-background border border-zinc-800 dark:border-[#3A3A4C] px-2.5 font-mono text-[11px] text-foreground focus:outline-none focus:border-purple-500 uppercase"
+                >
+                  <option value="">GLOBAL</option>
+                  {availableTenants.map((ten) => (
+                    <option key={ten.id} value={ten.id}>
+                      TENANT // {ten.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">{t.playground.targetModel}</span>
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="h-8 bg-background border border-zinc-800 dark:border-[#3A3A4C] px-2.5 font-mono text-[11px] text-foreground focus:outline-none focus:border-purple-500"
+                >
+                  <option value="mock">mock // HADESGATE_SIMULATOR</option>
+                  <option value="claude-sonnet-4-6">anthropic // claude-sonnet-4-6</option>
+                  <option value="claude-haiku-4-5-20251001">anthropic // claude-haiku-4-5</option>
+                  <option value="claude-opus-4-6">anthropic // claude-opus-4-6</option>
+                  <option value="gemini-2.5-flash">gemini // gemini-2.5-flash</option>
+                  <option value="gemini-2.5-pro">gemini // gemini-2.5-pro</option>
+                  <option value="gemini-2.0-flash">gemini // gemini-2.0-flash</option>
+                  <option value="gpt-4o">openai // gpt-4o</option>
+                  <option value="gpt-4o-mini">openai // gpt-4o-mini</option>
+                  <option value="ollama/llama3">ollama // llama3</option>
+                </select>
+              </div>
             </div>
           </div>
 

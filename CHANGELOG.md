@@ -10,6 +10,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 ## [Unreleased]
 
 ### Adicionado (Added)
+- **Licenciamento AGPL-3.0-only**:
+  - Substituição da licença MIT legada pela GNU Affero General Public License v3.0 somente, com texto oficial integral.
+  - Metadados SPDX, fórmulas Homebrew, README e Console alinhados; respostas HTTP passam a publicar a oferta de código-fonte por `Link` e a licença em `X-HadesGate-License`.
+- **Correção de nomes em contexto clínico**:
+  - Nomes com sobrenome em minúsculas após partícula, como `Roberto da silva`, passam a ser reconhecidos quando o sobrenome consta no catálogo, preservando o vínculo contextual com medicamentos e CIDs.
+  - Primeiro nome e nomes longos também podem estar totalmente em minúsculas; o detector usa frequência do catálogo, papéis nome/sobrenome, partículas e limites sintáticos para delimitar até oito partes substantivas.
+  - O corpus ganhou casos positivo e negativo específicos para evitar regressão e falso positivo em prosa comum.
 - **Fase 17 — BYOK Transparente Seguro**:
   - Identificação de tenant por fingerprint HMAC-SHA256 da chave original do provedor, sem persistência da credencial BYOK.
   - API e Console para cadastro e revogação de credenciais por tenant (`/api/provider-credentials`).
@@ -40,8 +47,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
   - Trilha Zero-PII persistente para mudanças de políticas e credenciais, identificada por `actor_key_id`, papel e timestamp, com nonce antirreplay e assinatura HMAC-SHA256 exportável para SIEM.
   - Backup e restauração AES-256-GCM das configurações já cifradas/fingerprints, excluindo traces, vault, prompts e plaintexts.
   - Nova aba de Governança no Console para credenciais administrativas, retenção, auditoria assinada e recuperação criptografada, com interface completa em pt-BR/en.
+- **Fase 21 — DLP Contextual & Proteção por Relacionamento (início em Saúde)**:
+  - Nova ação `contextual`, global e por tenant, com precedência segura para overrides explícitos de `mask`, `block`, `route_local` e `disabled`.
+  - `MEDICATION` e `CID` passam a usar perfil contextual por padrão: termos clínicos isolados seguem ao modelo, enquanto atributos vinculados a nome, documento, contato ou identificador médico no mesmo trecho permanecem mascarados.
+  - `SUS_CARD` e `MEDICAL_ID` permanecem em `mask`; uso de `contextual` em tipos ainda não suportados falha de forma fechada para `mask`.
+  - Console exibe o padrão efetivo, permite configuração global/tenant somente nas entidades elegíveis e explica a diferença entre confiança do detector e vínculo contextual.
+  - Cobertura in-package valida filtragem antes da tokenização e os fluxos HTTP streaming e não-streaming.
 - **Corpus de acurácia e gate por categoria**:
-  - Corpus ampliado de 41 para 130 cenários, incluindo 77 casos positivos, 53 controles negativos, textos multilíngues, múltiplas entidades, formatos compactos e colisões adversariais em 30 tipos.
+  - Corpus ampliado de 41 para 135 cenários, incluindo 80 casos positivos, 55 controles negativos, textos multilíngues, múltiplas entidades, formatos compactos e colisões adversariais em 30 tipos.
   - `pii-benchmark` agora valida integridade e cobertura mínima do corpus, apresenta falhas detalhadas e métricas por tipo, e exige precisão/recall ≥ 90% em cada categoria além do agregado.
   - Corrigidos falsos positivos de PIX em rótulos genéricos de chave privada, medicamento em nomes institucionais/IDs médicos e cartões sentinela com todos os dígitos repetidos.
   - Adicionados testes metamórficos para sete detectores em diferentes contextos textuais e validação exaustiva do detokenizador em todos os pontos de corte do stream, incluindo chunks de um byte.

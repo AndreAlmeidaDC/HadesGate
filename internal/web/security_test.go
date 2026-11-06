@@ -83,6 +83,12 @@ func TestSecurityMiddleware_CORS(t *testing.T) {
 			if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
 				t.Errorf("expected X-Frame-Options: DENY, got %q", got)
 			}
+			if got := w.Header().Get("Link"); got != "<https://github.com/rodolfoportalles/HadesGate>; rel=\"source\"" {
+				t.Errorf("unexpected AGPL source offer: %q", got)
+			}
+			if got := w.Header().Get("X-HadesGate-License"); got != "AGPL-3.0-only" {
+				t.Errorf("unexpected SPDX license header: %q", got)
+			}
 
 			// Verify CORS
 			gotOrigin := w.Header().Get("Access-Control-Allow-Origin")

@@ -2,6 +2,8 @@
 
 Este guia cobre o ambiente de desenvolvimento local (Windows, Linux e macOS), criação de novos detectores de PII/segredos e uso de agentes de IA para colaborar no projeto. Para deploy em produção, consulte o [README.md](README.md).
 
+Ao enviar uma contribuição, você concorda em disponibilizá-la sob a mesma licença do projeto, **GNU AGPL v3.0 somente** (`AGPL-3.0-only`). Consulte [`LICENSE`](LICENSE).
+
 ## Requisitos
 
 - **Go 1.26** ou superior. **Não é preciso compilador C (`CGO_ENABLED=0`)**: o HadesGate usa SQLite em Go puro (`modernc.org/sqlite`).

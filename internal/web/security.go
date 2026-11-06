@@ -7,6 +7,11 @@ import (
 	"sync/atomic"
 )
 
+const (
+	sourceCodeURL = "https://github.com/rodolfoportalles/HadesGate"
+	licenseSPDX   = "AGPL-3.0-only"
+)
+
 type securityConfig struct {
 	allowedOrigins []string
 }
@@ -80,6 +85,9 @@ func (p *SecurityPolicy) serveHTTP(next http.Handler, cfg *securityConfig, w htt
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	// AGPL section 13 source offer for browser and API users interacting remotely.
+	w.Header().Set("Link", "<"+sourceCodeURL+">; rel=\"source\"")
+	w.Header().Set("X-HadesGate-License", licenseSPDX)
 
 	if r.Method == http.MethodOptions {
 		if origin != "" && !allowed {

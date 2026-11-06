@@ -8,6 +8,9 @@ import { translations } from "@/lib/i18n";
 interface Trace {
   id: string;
   tenant?: string;
+  tenant_name?: string;
+  user_label?: string;
+  user_role?: string;
   policy_action?: string;
   timestamp: string;
   provider: string;
@@ -297,6 +300,11 @@ export function Observability({
       prov.toLowerCase().includes(q) ||
       (t.model && t.model.toLowerCase().includes(q)) ||
       (t.language && t.language.toLowerCase().includes(q)) ||
+      (t.tenant_name && t.tenant_name.toLowerCase().includes(q)) ||
+      (t.tenant && t.tenant.toLowerCase().includes(q)) ||
+      (t.user_label && t.user_label.toLowerCase().includes(q)) ||
+      (t.user_role && t.user_role.toLowerCase().includes(q)) ||
+      (q === "global" && (!t.tenant || t.tenant === "default" || t.tenant_name === "GLOBAL")) ||
       (t.sanitized_prompt && t.sanitized_prompt.toLowerCase().includes(q)) ||
       pii.some((item) => item.toLowerCase().includes(q)) ||
       secrets.some((item) => item.toLowerCase().includes(q))
@@ -581,13 +589,40 @@ export function Observability({
 
                       {/* PROVIDER // MODEL */}
                       <td className="py-3.5 px-3 whitespace-nowrap font-mono">
-                        <div className="flex items-center gap-2">
-                          <span className="border border-purple-700/70 dark:border-purple-500/70 bg-purple-700/10 dark:bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-purple-800 dark:text-purple-300">
-                            {providerLabel}
-                          </span>
-                          <span className="text-xs font-medium text-foreground">
-                            {trace.model || "default"}
-                          </span>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="border border-purple-700/70 dark:border-purple-500/70 bg-purple-700/10 dark:bg-purple-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-purple-800 dark:text-purple-300">
+                              {providerLabel}
+                            </span>
+                            <span className="text-xs font-medium text-foreground">
+                              {trace.model || "default"}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[9px] font-mono tracking-[0.05em]">
+                            {trace.tenant_name && trace.tenant_name !== "GLOBAL" ? (
+                              <span
+                                title={`Tenant: ${trace.tenant_name}`}
+                                className="border border-cyan-700/50 dark:border-cyan-500/50 bg-cyan-700/10 dark:bg-cyan-500/15 text-cyan-800 dark:text-cyan-300 px-1.5 py-0.2 font-bold uppercase"
+                              >
+                                {trace.tenant_name}
+                              </span>
+                            ) : (
+                              <span
+                                title={lang === "pt-BR" ? "Escopo Global" : "Global Scope"}
+                                className="border border-zinc-500/40 dark:border-[#45455A] bg-secondary/80 text-muted-foreground px-1.5 py-0.2 font-bold uppercase"
+                              >
+                                GLOBAL
+                              </span>
+                            )}
+                            {trace.user_label && (
+                              <span
+                                title={`Credencial: ${trace.user_label}${trace.user_role ? ` [${trace.user_role}]` : ""}`}
+                                className="border border-amber-600/50 dark:border-amber-400/50 bg-amber-600/10 dark:bg-amber-400/15 text-amber-800 dark:text-amber-300 px-1.5 py-0.2 font-bold uppercase"
+                              >
+                                {trace.user_label}{trace.user_role ? ` [${trace.user_role}]` : ""}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
 
@@ -599,7 +634,7 @@ export function Observability({
                       {/* PII DETECTED */}
                       <td className="py-3.5 px-3">
                         {pii.length > 0 ? (
-                          <div className="flex flex-wrap gap-1.5">
+                           <div className="flex flex-wrap gap-1.5">
                             {pii.map((label) => (
                               <span
                                 key={label}
@@ -652,6 +687,26 @@ export function Observability({
                                 {t.observability.maskedPromptTitle}
                               </span>
                               <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
+                                <span>
+                                  {lang === "pt-BR" ? "ESCOPO: " : "SCOPE: "}
+                                  <strong className="text-foreground">
+                                    {trace.tenant_name && trace.tenant_name !== "GLOBAL"
+                                      ? `TENANT // ${trace.tenant_name}`
+                                      : "GLOBAL"}
+                                  </strong>
+                                </span>
+                                {trace.user_label && (
+                                  <>
+                                    <span>///</span>
+                                    <span>
+                                      {lang === "pt-BR" ? "USUÁRIO: " : "USER: "}
+                                      <strong className="text-foreground">
+                                        {trace.user_label}{trace.user_role ? ` [${trace.user_role}]` : ""}
+                                      </strong>
+                                    </span>
+                                  </>
+                                )}
+                                <span>///</span>
                                 <span>
                                   SCAN:{" "}
                                   <strong className="text-foreground">

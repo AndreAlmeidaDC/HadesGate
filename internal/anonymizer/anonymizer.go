@@ -35,9 +35,13 @@ type Result struct {
 
 // AnonymizeOptions customizes detection for a single request without mutating the engine.
 type AnonymizeOptions struct {
-	// IsTypeDisabled is evaluated before a match is retained. Returning true lets
-	// that entity pass through unchanged and excludes it from metrics and the vault.
+	// IsTypeDisabled is evaluated before tokenization. Disabled matches remain
+	// temporarily visible to relationship filters, then pass through unchanged
+	// and are excluded from metrics and the vault.
 	IsTypeDisabled func(detector.EntityType) bool
+	// FilterMatches can apply request-scoped relationship policies after all
+	// detectors and confidence thresholds run, but before tokenization.
+	FilterMatches func(text string, matches []detector.Match) []detector.Match
 }
 
 // Engine coordinates PII detectors and token vault management.
@@ -353,9 +357,6 @@ func (e *Engine) AnonymizeWithOptions(sessionID, text string, options AnonymizeO
 	for _, d := range e.detectors {
 		matches := d.Detect(text)
 		for _, m := range matches {
-			if options.IsTypeDisabled != nil && options.IsTypeDisabled(m.Type) {
-				continue
-			}
 			// Apply dynamic Confidence Score filter (per entity or family)
 			if m.Score < e.ThresholdFor(m.Type) {
 				continue
@@ -366,6 +367,18 @@ func (e *Engine) AnonymizeWithOptions(sessionID, text string, options AnonymizeO
 			}
 			allMatches = append(allMatches, m)
 		}
+	}
+	if options.FilterMatches != nil && len(allMatches) > 0 {
+		allMatches = options.FilterMatches(text, allMatches)
+	}
+	if options.IsTypeDisabled != nil && len(allMatches) > 0 {
+		enabledMatches := allMatches[:0]
+		for _, match := range allMatches {
+			if !options.IsTypeDisabled(match.Type) {
+				enabledMatches = append(enabledMatches, match)
+			}
+		}
+		allMatches = enabledMatches
 	}
 
 	if len(allMatches) == 0 {

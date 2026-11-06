@@ -9,6 +9,7 @@ const (
 	Block      Action = "block"
 	RouteLocal Action = "route_local"
 	Disabled   Action = "disabled"
+	Contextual Action = "contextual"
 )
 
 type Decision struct {
@@ -25,7 +26,7 @@ func New(actions map[string]string) *Engine {
 	compiled := make(map[string]Action, len(actions))
 	for entityType, rawAction := range actions {
 		action := Action(strings.ToLower(strings.TrimSpace(rawAction)))
-		if action == Mask || action == Block || action == RouteLocal || action == Disabled {
+		if action == Mask || action == Block || action == RouteLocal || action == Disabled || action == Contextual {
 			compiled[strings.ToUpper(strings.TrimSpace(entityType))] = action
 		}
 	}
@@ -36,14 +37,27 @@ func New(actions map[string]string) *Engine {
 func (e *Engine) ActionFor(rawType string) Action {
 	entityType := strings.ToUpper(strings.TrimSpace(rawType))
 	action := e.actions[entityType]
+	if action == Contextual && !supportsContextual(entityType) {
+		action = ""
+	}
 	if action == "" && e.familyResolver != nil {
 		family := strings.ToUpper(strings.TrimSpace(e.familyResolver(entityType)))
 		action = e.actions[family]
 	}
 	if action == "" {
+		if supportsContextual(entityType) {
+			return Contextual
+		}
+		return Mask
+	}
+	if action == Contextual && !supportsContextual(entityType) {
 		return Mask
 	}
 	return action
+}
+
+func supportsContextual(entityType string) bool {
+	return entityType == "MEDICATION" || entityType == "CID"
 }
 
 // IsDisabled reports whether an entity must bypass DLP detection and tokenization.
@@ -77,7 +91,7 @@ func (e *Engine) Decide(entityTypes []string) Decision {
 		if action == Disabled {
 			continue
 		}
-		if action != Mask && !seen[entityType] {
+		if action != Mask && action != Contextual && !seen[entityType] {
 			decision.Types = append(decision.Types, entityType)
 			seen[entityType] = true
 		}

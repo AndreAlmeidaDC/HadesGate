@@ -95,12 +95,16 @@ func (g *Gateway) HandleResponses(w http.ResponseWriter, r *http.Request) {
 	entityTypes, piiTypes, secretTypes := observability.ClassifyEntities(collectedEntities)
 	var targetURL, apiKey string
 	var isMock bool
+	userInfo := g.userForRequest(r)
+	tenantName := g.ResolveTenantName(tenant)
 
 	statusCode := http.StatusOK
 	defer func() {
 		if g.traces != nil {
 			g.traces.Record(observability.Trace{
-				ID: requestID, Tenant: tenant, PolicyAction: w.Header().Get("X-HadesGate-Policy-Action"),
+				ID: requestID, Tenant: tenant, TenantName: tenantName,
+				UserLabel: userInfo.Label, UserRole: userInfo.Role,
+				PolicyAction: w.Header().Get("X-HadesGate-Policy-Action"),
 				Timestamp: start, Provider: observability.InferProvider("responses", model, targetURL, isMock),
 				Model: model, Language: detectedLang, Stream: isStreaming,
 				StatusCode: statusCode, DurationMs: float64(time.Since(start).Microseconds()) / 1000,
@@ -235,10 +239,15 @@ func (g *Gateway) HandleAnthropicMessages(w http.ResponseWriter, r *http.Request
 	entityTypes, piiTypes, secretTypes := observability.ClassifyEntities(collectedEntities)
 	var targetURL string
 	statusCode := http.StatusOK
+	userInfo := g.userForRequest(r)
+	tenantName := g.ResolveTenantName(tenant)
+
 	defer func() {
 		if g.traces != nil {
 			g.traces.Record(observability.Trace{
-				ID: requestID, Tenant: tenant, PolicyAction: w.Header().Get("X-HadesGate-Policy-Action"),
+				ID: requestID, Tenant: tenant, TenantName: tenantName,
+				UserLabel: userInfo.Label, UserRole: userInfo.Role,
+				PolicyAction: w.Header().Get("X-HadesGate-Policy-Action"),
 				Timestamp: start, Provider: observability.InferProvider("anthropic", model, targetURL, false),
 				Model: model, Language: detectedLang, Stream: isStreaming,
 				StatusCode: statusCode, DurationMs: float64(time.Since(start).Microseconds()) / 1000,
@@ -384,10 +393,15 @@ func (g *Gateway) HandleGeminiModels(w http.ResponseWriter, r *http.Request) {
 	entityTypes, piiTypes, secretTypes := observability.ClassifyEntities(collectedEntities)
 	var targetURL string
 	statusCode := http.StatusOK
+	userInfo := g.userForRequest(r)
+	tenantName := g.ResolveTenantName(tenant)
+
 	defer func() {
 		if g.traces != nil {
 			g.traces.Record(observability.Trace{
-				ID: requestID, Tenant: tenant, PolicyAction: w.Header().Get("X-HadesGate-Policy-Action"),
+				ID: requestID, Tenant: tenant, TenantName: tenantName,
+				UserLabel: userInfo.Label, UserRole: userInfo.Role,
+				PolicyAction: w.Header().Get("X-HadesGate-Policy-Action"),
 				Timestamp: start, Provider: observability.InferProvider("gemini", model, targetURL, false),
 				Model: model, Language: detectedLang, Stream: isStreaming,
 				StatusCode: statusCode, DurationMs: float64(time.Since(start).Microseconds()) / 1000,

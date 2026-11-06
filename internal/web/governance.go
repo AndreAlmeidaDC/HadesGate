@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -50,6 +51,8 @@ func (s *Server) handleAdminCredentials(w http.ResponseWriter, r *http.Request) 
 		s.auditChange(r, "admin_credential.created", "admin_credential", credential.KeyID, map[string]interface{}{"role": credential.Role})
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(credential)
+	case http.MethodPut:
+		s.handleAdminCredentialRotate(w, r)
 	case http.MethodDelete:
 		keyID := strings.TrimSpace(r.URL.Query().Get("key_id"))
 		if keyID == "" {
@@ -69,6 +72,50 @@ func (s *Server) handleAdminCredentials(w http.ResponseWriter, r *http.Request) 
 	default:
 		http.Error(w, `{"error":{"message":"Method not allowed"}}`, http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleAdminCredentialRotate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		http.Error(w, `{"error":{"message":"Method not allowed"}}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, `{"error":{"message":"Config store not initialized"}}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// Strictly enforce that ONLY the root HADESGATE_ADMIN_KEY (bootstrap) can rotate!
+	principal := principalFromRequest(r)
+	if principal.KeyID != "bootstrap" {
+		writeAuthorizationError(w, http.StatusForbidden, "Apenas a chave mestre HADESGATE_ADMIN_KEY pode rotacionar credenciais administrativas")
+		return
+	}
+
+	var request struct {
+		KeyID string `json:"key_id"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&request)
+	}
+	keyID := strings.TrimSpace(request.KeyID)
+	if keyID == "" {
+		keyID = strings.TrimSpace(r.URL.Query().Get("key_id"))
+	}
+	if keyID == "" {
+		http.Error(w, `{"error":{"message":"key_id is required"}}`, http.StatusBadRequest)
+		return
+	}
+
+	credential, err := s.store.RotateAdminCredential(r.Context(), keyID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	s.auditChange(r, "admin_credential.rotated", "admin_credential", credential.KeyID, map[string]interface{}{"role": credential.Role})
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(credential)
 }
 
 func (s *Server) handleRetention(w http.ResponseWriter, r *http.Request) {

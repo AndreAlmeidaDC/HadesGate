@@ -7,7 +7,8 @@ import (
 )
 
 // contextualNameRegex finds names preceded by greetings, honorifics, role labels, action verbs, and prepositions.
-// Case-insensitivity (?i:...) is scoped strictly to the trigger and connectors so lowercase prose words after a name are never swallowed.
+// It captures up to eight substantive parts in any letter case; evaluateCandidate
+// then validates lowercase tokens against catalog roles/frequency and sentence boundaries.
 var contextualNameRegex = regexp.MustCompile(
 	`\b((?i:` +
 		`bom\s+dia|boa\s+tarde|boa\s+noite|nome\s+completo|nome(?:\s+[ée]|\s*:)?|chama-se|assinado\s+por|` +
@@ -23,7 +24,7 @@ var contextualNameRegex = regexp.MustCompile(
 		`fiador(?:a|es|as)?|representante|s[óo]ci[oa]s?|motorista|condutor(?:a|es|as)?|segurad[oa]s?|` +
 		`dependente|respons[aá]vel|candidat[oa]s?|alun[oa]s?|estudante|para|de|do|da|com|por|ao` +
 		`))\s*[,:]?\s+` +
-		`((?:[A-ZÀ-Ú][a-zà-ú]+|[A-ZÀ-Ú]{2,})(?:\s+(?i:da|de|do|das|dos|e)\s+(?:[A-ZÀ-Ú][a-zà-ú]+|[A-ZÀ-Ú]{2,})|\s+(?:[A-ZÀ-Ú][a-zà-ú]+|[A-ZÀ-Ú]{2,})){0,5})\b`,
+		`((?:[A-ZÀ-Ú][a-zà-ú]+|[A-ZÀ-Ú]{2,}|[a-zà-ú]{2,})(?:\s+(?i:da|de|do|das|dos|e)\s+(?:[A-ZÀ-Ú][a-zà-ú]+|[A-ZÀ-Ú]{2,}|[a-zà-ú]{2,})|\s+(?:[A-ZÀ-Ú][a-zà-ú]+|[A-ZÀ-Ú]{2,}|[a-zà-ú]{2,})){0,7})\b`,
 )
 
 // standaloneNameRegex captures 2-to-6 word proper name candidates anywhere in text (e.g. at start of sentence
@@ -137,6 +138,8 @@ var nonNameWords = map[string]bool{
 	"fone": true, "tel": true, "whatsapp": true, "contato": true, "site": true, "url": true,
 	"http": true, "https": true, "api": true, "key": true, "token": true, "secret": true,
 	"senha": true, "password": true, "login": true, "username": true, "ip": true,
+	"segredo": true, "no": true, "na": true, "nos": true, "nas": true,
+	"pelo": true, "pela": true, "pelos": true, "pelas": true,
 	"dns": true, "ssh": true, "ssl": true, "tls": true, "jwt": true, "oauth": true,
 	"json": true, "xml": true, "html": true, "css": true, "sql": true, "db": true,
 	"database": true, "server": true, "cloud": true, "docker": true, "kubernetes": true,
@@ -160,8 +163,16 @@ var nonNameWords = map[string]bool{
 	"versao": true, "codigo": true, "lote": true, "relatorio": true, "arquivo": true,
 	"emitir": true, "gerar": true, "criar": true, "enviar": true, "transferir": true,
 	"pagar": true, "solicitar": true, "confirmar": true, "atualizar": true, "via": true,
+	"deve": true, "devera": true, "precisa": true, "pode": true, "vai": true, "ira": true,
+	"tem": true, "teve": true, "foi": true, "sera": true, "realizou": true,
+	"confirmou": true, "solicitou": true, "informou": true, "pediu": true, "nasceu": true,
+	"mora": true, "trabalha": true, "recebeu": true, "toma": true, "tomar": true,
+	"usar": true, "receitou": true, "necessita": true,
 	"seja": true, "sejam": true, "obrigado": true, "obrigada": true, "favor": true,
 	"conforme": true, "acordo": true, "termo": true, "termos": true,
+	"meu": true, "minha": true, "meus": true, "minhas": true,
+	"seu": true, "sua": true, "seus": true, "suas": true,
+	"nosso": true, "nossa": true, "nossos": true, "nossas": true,
 	"segunda-feira": true, "terca-feira": true, "quarta-feira": true, "quinta-feira": true, "sexta-feira": true,
 }
 
@@ -171,6 +182,11 @@ var surnameSuffixes = []string{
 	"atti", "otti", "etti", "ucci", "elli", "ini", "ato",
 	"mann", "berg", "stein", "ski", "sky", "wicz", "canti", "cante", "buquerque",
 }
+
+const (
+	minLowercaseGivenFrequency   uint32 = 25
+	minLowercaseSurnameFrequency uint32 = 5
+)
 
 // NameDetector identifies person names deterministically using an embedded ~330k names catalog,
 // Aho-Corasick candidate search, boundary & contextual validators, compound name grouping, and evidence scoring.
@@ -538,7 +554,8 @@ func (d *NameDetector) evaluateCandidate(text, trigger string, rawStart, rawEnd 
 	// Validate first token: if it is a stopword, connector, or invalid shape, reject the span
 	first := spans[0]
 	firstAllCaps := isAllUpperToken(first.word)
-	if connectorParticles[first.norm] || nonNameWords[first.norm] || leadingTriggerWords[first.norm] || !isValidNameTokenShape(first.word, firstAllCaps) {
+	lowercaseKnownGiven := fromCtx && d.isKnownLowercaseName(first.word, NameTypeGiven)
+	if connectorParticles[first.norm] || nonNameWords[first.norm] || leadingTriggerWords[first.norm] || (!isValidNameTokenShape(first.word, firstAllCaps) && !lowercaseKnownGiven) {
 		return Match{}, false
 	}
 
@@ -562,7 +579,8 @@ func (d *NameDetector) evaluateCandidate(text, trigger string, rawStart, rawEnd 
 		if firstAllCaps && !isAllUpperToken(sp.word) {
 			break
 		}
-		if !isValidNameTokenShape(sp.word, firstAllCaps) {
+		lowercaseKnownContinuation := fromCtx && d.isKnownLowercaseName(sp.word, NameTypeGiven|NameTypeSurname)
+		if !isValidNameTokenShape(sp.word, firstAllCaps) && !lowercaseKnownContinuation {
 			break
 		}
 		validLen = i + 1
@@ -685,6 +703,35 @@ func (d *NameDetector) evaluateCandidate(text, trigger string, rawStart, rawEnd 
 		ContextFound:    ctxFound,
 		ValidatorPassed: len(ctxFound) > 0 || hasKnownLexicon || hasMorphSurname || hasRightDocCtx,
 	}, true
+}
+
+func (d *NameDetector) isKnownLowercaseName(word string, allowedFlags uint8) bool {
+	if d.ac == nil || word == "" {
+		return false
+	}
+	if len([]rune(word)) < 3 {
+		return false
+	}
+	hasLetter := false
+	for _, r := range word {
+		if !unicode.IsLetter(r) && r != '-' && r != '\'' {
+			return false
+		}
+		if unicode.IsLetter(r) {
+			hasLetter = true
+			if !unicode.IsLower(r) {
+				return false
+			}
+		}
+	}
+	entry, ok := d.ac.Lookup(normalizeToken(word))
+	if !hasLetter || !ok {
+		return false
+	}
+	if allowedFlags&NameTypeGiven != 0 && entry.Flags&NameTypeGiven != 0 && entry.FreqGiven >= minLowercaseGivenFrequency {
+		return true
+	}
+	return allowedFlags&NameTypeSurname != 0 && entry.Flags&NameTypeSurname != 0 && entry.FreqSurname >= minLowercaseSurnameFrequency
 }
 
 func mergeNameMatch(existing []Match, candidate Match) []Match {

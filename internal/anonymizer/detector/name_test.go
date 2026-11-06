@@ -113,6 +113,51 @@ func TestNameDetector_SingleNamesWithTriggers(t *testing.T) {
 	}
 }
 
+func TestNameDetector_RecognizesLowercaseSurnameInClinicalRequest(t *testing.T) {
+	d := NewNameDetector()
+	text := "gere uma receita de dipirona 1g para Roberto da silva"
+	matches := d.Detect(text)
+
+	if len(matches) != 1 {
+		t.Fatalf("Detect(%q) returned %d matches %+v, want one PERSON", text, len(matches), matches)
+	}
+	if matches[0].Value != "Roberto da silva" {
+		t.Fatalf("match value = %q, want %q", matches[0].Value, "Roberto da silva")
+	}
+}
+
+func TestNameDetector_RecognizesFullyLowercaseAndLongNamesFromContext(t *testing.T) {
+	d := NewNameDetector()
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "fully lowercase clinical request",
+			text: "gere uma receita de dipirona 1g para roberto da silva",
+			want: "roberto da silva",
+		},
+		{
+			name: "six surnames and sentence boundary",
+			text: "O paciente ana maria da silva santos souza oliveira costa rodrigues precisa tomar o medicamento.",
+			want: "ana maria da silva santos souza oliveira costa rodrigues",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			matches := d.Detect(tc.text)
+			if len(matches) != 1 {
+				t.Fatalf("Detect(%q) returned %d matches %+v, want one PERSON", tc.text, len(matches), matches)
+			}
+			if matches[0].Value != tc.want {
+				t.Fatalf("match value = %q, want %q", matches[0].Value, tc.want)
+			}
+		})
+	}
+}
+
 func TestNameDetector_GeographicAndPlaceDisambiguation(t *testing.T) {
 	d := NewNameDetector()
 
@@ -159,4 +204,3 @@ func TestNameDetector_GeographicAndPlaceDisambiguation(t *testing.T) {
 		})
 	}
 }
-

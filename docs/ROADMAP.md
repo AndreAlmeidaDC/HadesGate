@@ -52,7 +52,7 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 
 ## Phase 5 — Measurable Detection Quality
 
-- [x] Build a multilingual accuracy corpus with 130 scenarios, including positive, negative, mixed, compact, validator, and adversarial collision controls.
+- [x] Build a multilingual accuracy corpus with 135 scenarios, including positive, negative, mixed, compact, validator, contextual-link, and adversarial collision controls.
 - [x] Gate CI on deterministic detector precision and recall globally and per entity type (`pii-benchmark`), with structural minimums for cases, negative controls, and covered types.
 - [x] Add hard-negative collision suites for UUIDs, locations, documentation placeholders, sentinels, medical identifiers, and pharmaceutical catalog homonyms.
 - [x] Add metamorphic detector tests across Unicode context, line breaks, JSON, and Markdown while validating exact UTF-8 byte spans.
@@ -97,8 +97,9 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 
 - [x] Expand contextual proper name detection (`detector/name.go`) with extensive greeting, honorific, role, invoice, and action verb triggers.
 - [x] Support Brazilian proper names immediately followed by document appositions without commas (e.g., `"cobrança para Rodolfo Bandeira de CPF: 09897684492"`).
+- [x] Reconhecer nomes contextuais sem depender de capitalização, validando primeiro nome e sobrenomes no catálogo, com partículas e até oito partes substantivas.
 - [x] Harden UTF-8 rune boundary slicing in context extraction routines.
-- [x] Expand `benchmarks/pii-accuracy/corpus.json` to 130 cases across 30 entity types, maintaining 100% measured precision and recall (global/per-type gate threshold $\ge 90\%$).
+- [x] Expand `benchmarks/pii-accuracy/corpus.json` to 135 cases across 30 entity types, maintaining 100% measured precision and recall (global/per-type gate threshold $\ge 90\%$).
 - [x] Provide Windows PowerShell environment scripts (`scripts/enable-hadesgate.ps1`, `scripts/disable-hadesgate.ps1`) for transparent CLI AI tooling interception (Aider, Claude Code, Cursor).
 
 ---
@@ -133,6 +134,7 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 
 ### Phase 19 — Governança, Retenção & Auditoria Enterprise
 
+- [x] Formalizar o licenciamento do projeto como `AGPL-3.0-only`, alinhar metadados de distribuição e publicar oferta de código-fonte no Console e nas respostas HTTP.
 - [x] Configurar retenção de telemetria por tenant, expiração temporal e quotas de armazenamento.
 - [x] Adicionar credenciais administrativas accountless com papéis mínimos (`viewer`, `operator`, `admin`) sem reutilizar credenciais de proxy.
 - [x] Exportar auditoria assinada e Zero-PII para SIEM, com nonce antirreplay e persistência SQLite.
@@ -146,6 +148,16 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 - [ ] Health/readiness separados, shutdown drenando streams e métricas de saturação por tenant.
 - [ ] Orçamento de performance contínuo para DLP de entrada/saída, streaming e SQLite.
 - [ ] Política versionada de migração e remoção definitiva das rotas legadas com chave na URL.
+
+### Phase 21 — DLP Contextual & Proteção por Relacionamento
+
+- [x] Criar a ação `contextual` com overrides globais e por tenant, mantendo `mask`, `block`, `route_local` e `disabled` como decisões explícitas prioritárias.
+- [x] Iniciar pela família de saúde: `MEDICATION` e `CID` isolados podem seguir ao modelo, mas são protegidos quando ligados a uma identidade direta no mesmo trecho.
+- [x] Manter identificadores médicos diretos (`SUS_CARD` e `MEDICAL_ID`) mascarados e aplicar fallback seguro para `mask` quando `contextual` for solicitado em uma entidade ainda não suportada.
+- [x] Cobrir processamento antes da tokenização, streaming e não-streaming, além de expor o perfil efetivo no Console em pt-BR/en.
+- [ ] Evoluir o vínculo contextual de janela textual para relações estruturadas por mensagem/campo, com corpus específico de falsos vínculos e relações omitidas.
+- [ ] Avaliar perfis contextuais separados para dados corporativos públicos, RH, jurídico e localização, liberando cada entidade somente após atingir o gate de precisão/recall e revisão de risco regulatório.
+- [ ] Adicionar métricas Zero-PII de decisões contextuais (liberado/protegido por categoria) sem persistir valores ou relações identificáveis.
 
 ### Phase 11 — Endurecimento de Segurança, DLP de Saída & Métricas Prometheus
 

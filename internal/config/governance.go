@@ -123,6 +123,44 @@ func (s *Store) CreateAdminCredential(ctx context.Context, label string, role Ad
 	return credential, nil
 }
 
+// RotateAdminCredential invalidates the existing secret of an admin credential and generates a new one.
+func (s *Store) RotateAdminCredential(ctx context.Context, keyID string) (AdminCredential, error) {
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		return AdminCredential{}, fmt.Errorf("key_id is required")
+	}
+
+	var item AdminCredential
+	var enabled int
+	err := s.db.QueryRowContext(ctx, `SELECT key_id, label, role, enabled, created_at FROM admin_credentials WHERE key_id = ?`, keyID).
+		Scan(&item.KeyID, &item.Label, &item.Role, &enabled, &item.CreatedAt)
+	if err == sql.ErrNoRows {
+		return AdminCredential{}, fmt.Errorf("credential not found")
+	}
+	if err != nil {
+		return AdminCredential{}, fmt.Errorf("querying admin credential: %w", err)
+	}
+
+	secretPart, err := randomHex(32)
+	if err != nil {
+		return AdminCredential{}, fmt.Errorf("generating credential secret: %w", err)
+	}
+	newSecret := "hg_admin_" + secretPart
+	newFingerprint := s.credentialFingerprint(newSecret)
+	now := time.Now().UTC()
+
+	_, err = s.db.ExecContext(ctx, `UPDATE admin_credentials SET fingerprint = ?, updated_at = ?, last_used_at = NULL WHERE key_id = ?`,
+		newFingerprint, now, keyID)
+	if err != nil {
+		return AdminCredential{}, fmt.Errorf("updating admin credential: %w", err)
+	}
+
+	item.Enabled = enabled == 1
+	item.UpdatedAt = now
+	item.Secret = newSecret
+	return item, nil
+}
+
 func (s *Store) ListAdminCredentials(ctx context.Context) ([]AdminCredential, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT key_id,label,role,enabled,created_at,updated_at,last_used_at FROM admin_credentials ORDER BY created_at DESC`)
 	if err != nil {

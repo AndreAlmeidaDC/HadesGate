@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -135,18 +136,19 @@ func (d *Dispatcher) ShouldDispatch(eventType string) bool {
 	return d.cfg.Events[eventType] || d.cfg.Events["*"]
 }
 
-// TestDispatch sends a synchronous test alert to verify connectivity.
-func (d *Dispatcher) TestDispatch(evt Event) error {
+// TestDispatchTarget sends a synchronous test alert to verify connectivity to a specific target URL.
+func (d *Dispatcher) TestDispatchTarget(targetURL, secret string, evt Event) error {
 	if d == nil {
 		return fmt.Errorf("webhook dispatcher is nil")
 	}
-	d.mu.RLock()
-	url := d.cfg.URL
-	secret := d.cfg.Secret
-	d.mu.RUnlock()
+	targetURL = strings.TrimSpace(targetURL)
+	if targetURL == "" {
+		return fmt.Errorf("nenhuma URL de webhook configurada")
+	}
 
-	if url == "" {
-		return fmt.Errorf("no webhook URL configured")
+	parsed, err := url.Parse(targetURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("URL do webhook inválida (%q): deve iniciar com http:// ou https://", targetURL)
 	}
 
 	if evt.Timestamp.IsZero() {
@@ -164,7 +166,7 @@ func (d *Dispatcher) TestDispatch(evt Event) error {
 		return fmt.Errorf("marshaling test payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payloadBytes))
+	req, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return fmt.Errorf("creating HTTP request: %w", err)
 	}
@@ -180,7 +182,7 @@ func (d *Dispatcher) TestDispatch(evt Event) error {
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("connecting to %s: %w", url, err)
+		return fmt.Errorf("connecting to %s: %w", targetURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -188,6 +190,19 @@ func (d *Dispatcher) TestDispatch(evt Event) error {
 		return fmt.Errorf("remote server returned HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// TestDispatch sends a synchronous test alert to verify connectivity.
+func (d *Dispatcher) TestDispatch(evt Event) error {
+	if d == nil {
+		return fmt.Errorf("webhook dispatcher is nil")
+	}
+	d.mu.RLock()
+	url := d.cfg.URL
+	secret := d.cfg.Secret
+	d.mu.RUnlock()
+
+	return d.TestDispatchTarget(url, secret, evt)
 }
 
 // Dispatch non-blockingly queues an alert event for delivery.

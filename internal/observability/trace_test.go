@@ -172,3 +172,51 @@ func TestClassifyEntitiesAndLanguageDetection(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteTraceLogger_TenantAndUserMetadata(t *testing.T) {
+	logger := NewTraceLogger(10)
+	defer logger.Close()
+
+	logger.Record(Trace{
+		ID:         "trace_tenant_user",
+		Tenant:     "01",
+		TenantName: "Financeiro",
+		UserLabel:  "TESTE",
+		UserRole:   "VIEWER",
+		Provider:   "openai",
+		Model:      "gpt-4o",
+	})
+	logger.Record(Trace{
+		ID:         "trace_global_bootstrap",
+		Tenant:     "default",
+		TenantName: "GLOBAL",
+		UserLabel:  "BOOTSTRAP",
+		UserRole:   "ADMIN",
+		Provider:   "anthropic",
+		Model:      "claude-3-7-sonnet",
+	})
+
+	traces := logger.GetAll()
+	if len(traces) != 2 {
+		t.Fatalf("expected 2 traces, got %d", len(traces))
+	}
+
+	// newest first
+	t1 := traces[0]
+	if t1.ID != "trace_global_bootstrap" || t1.TenantName != "GLOBAL" || t1.UserLabel != "BOOTSTRAP" || t1.UserRole != "ADMIN" {
+		t.Errorf("unexpected t1: %+v", t1)
+	}
+
+	t2 := traces[1]
+	if t2.ID != "trace_tenant_user" || t2.Tenant != "01" || t2.TenantName != "Financeiro" || t2.UserLabel != "TESTE" || t2.UserRole != "VIEWER" {
+		t.Errorf("unexpected t2: %+v", t2)
+	}
+
+	paged, total := logger.GetPaged(10, 0)
+	if total != 2 || len(paged) != 2 {
+		t.Fatalf("expected 2 paged traces, got %d / total %d", len(paged), total)
+	}
+	if paged[1].TenantName != "Financeiro" || paged[1].UserLabel != "TESTE" || paged[1].UserRole != "VIEWER" {
+		t.Errorf("unexpected paged[1]: %+v", paged[1])
+	}
+}

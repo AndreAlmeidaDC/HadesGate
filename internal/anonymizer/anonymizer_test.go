@@ -495,3 +495,24 @@ func TestAnonymizer_DynamicThresholds(t *testing.T) {
 		t.Fatalf("expected PERSON to be detected again after resetting PERSONAL family threshold")
 	}
 }
+
+func TestAnonymizer_RequestScopedMatchFilterRunsBeforeVaultTokenization(t *testing.T) {
+	v := vault.NewMemoryVault(5 * time.Minute)
+	defer v.Close()
+	engine := NewEngine(DefaultConfig(), v)
+	text := "Receita de Amoxicilina 500mg."
+	result := engine.AnonymizeWithOptions("contextual-filter", text, AnonymizeOptions{
+		FilterMatches: func(_ string, matches []detector.Match) []detector.Match {
+			filtered := matches[:0]
+			for _, match := range matches {
+				if match.Type != detector.EntityMedication {
+					filtered = append(filtered, match)
+				}
+			}
+			return filtered
+		},
+	})
+	if result.SanitizedText != text || len(result.Entities) != 0 || len(result.TokenMap) != 0 {
+		t.Fatalf("filtered match reached tokenization or vault: %+v", result)
+	}
+}

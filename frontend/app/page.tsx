@@ -223,8 +223,16 @@ export default function Home() {
             <strong className="text-foreground">HADESGATE™</strong>
             <span>/// DETERMINISTIC PII &amp; SECRET ANONYMIZATION GATEWAY</span>
           </div>
-          <div>
+          <div className="flex items-center gap-3">
             <span>REV 2.0 // SQLITE_ZERO_PII // GO_STATIC_BINARY</span>
+            <a
+              href="https://github.com/rodolfoportalles/HadesGate"
+              target="_blank"
+              rel="noreferrer"
+              className="font-bold text-purple-500 hover:text-purple-400 underline underline-offset-2"
+            >
+              SOURCE // AGPL-3.0
+            </a>
           </div>
         </div>
       </footer>

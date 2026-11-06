@@ -128,5 +128,10 @@
   {"id":"negative_bearer_placeholder","text":"Authorization: Bearer <token> é apenas a sintaxe documentada.","expected":[],"language":"pt-BR","tags":["negative","secret","documentation"]},
   {"id":"negative_public_key_header","text":"O cabeçalho -----BEGIN PUBLIC KEY----- identifica uma chave pública.","expected":[],"language":"pt-BR","tags":["negative","secret","documentation"]},
   {"id":"negative_invalid_vehicle_vin_letter_o","text":"VIN inválido 1HGBH41JXMN10918O usado no manual técnico.","expected":[],"language":"pt-BR","tags":["negative","validator","vehicle"]},
-  {"id":"negative_invalid_cnh_repeated_digits","text":"CNH 99999999999 é um valor fictício reservado para testes.","expected":[],"language":"pt-BR","tags":["negative","validator"]}
+  {"id":"negative_invalid_cnh_repeated_digits","text":"CNH 99999999999 é um valor fictício reservado para testes.","expected":[],"language":"pt-BR","tags":["negative","validator"]},
+  {"id":"person_lowercase_surname_health_link","text":"gere uma receita de dipirona 1g para Roberto da silva","expected":[{"type":"MEDICATION","text":"dipirona 1g"},{"type":"PERSON","text":"Roberto da silva"}],"language":"pt-BR","tags":["health","person","context","case"]},
+  {"id":"negative_lowercase_particle_prose","text":"O relatório foi enviado para Roberto da equipe técnica.","expected":[],"language":"pt-BR","tags":["negative","person","case"]},
+  {"id":"person_fully_lowercase_health_link","text":"gere uma receita de dipirona 1g para roberto da silva","expected":[{"type":"MEDICATION","text":"dipirona 1g"},{"type":"PERSON","text":"roberto da silva"}],"language":"pt-BR","tags":["health","person","context","case"]},
+  {"id":"person_fully_lowercase_long_name","text":"O paciente ana maria da silva santos souza oliveira costa rodrigues precisa tomar o medicamento.","expected":[{"type":"PERSON","text":"ana maria da silva santos souza oliveira costa rodrigues"}],"language":"pt-BR","tags":["health","person","context","case","long-name"]},
+  {"id":"negative_lowercase_context_prose","text":"O paciente no ambulatório precisa atualizar os dados do sistema.","expected":[],"language":"pt-BR","tags":["negative","person","context","case"]}
 ]

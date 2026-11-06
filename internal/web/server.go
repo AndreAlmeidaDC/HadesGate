@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
@@ -110,6 +111,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/anvisa/status", s.requireRole(config.RoleViewer, s.handleAnvisaStatus))
 	mux.HandleFunc("/api/anvisa/sync", s.requireRole(config.RoleOperator, s.handleAnvisaSync))
 	mux.HandleFunc("/api/admin-credentials", s.requireRole(config.RoleAdmin, s.handleAdminCredentials))
+	mux.HandleFunc("/api/admin-credentials/rotate", s.requireRole(config.RoleAdmin, s.handleAdminCredentialRotate))
 	mux.HandleFunc("/api/retention", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleRetention))
 	mux.HandleFunc("/api/audit/events", s.requireRole(config.RoleViewer, s.handleAuditEvents))
 	mux.HandleFunc("/api/config-backup", s.requireRole(config.RoleAdmin, s.handleConfigBackup))
@@ -244,6 +246,7 @@ type TestAnonymizeRequest struct {
 	RecordTrace bool   `json:"record_trace,omitempty"`
 	Provider    string `json:"provider,omitempty"`
 	Model       string `json:"model,omitempty"`
+	Tenant      string `json:"tenant,omitempty"`
 }
 
 type TestAnonymizeResponse struct {
@@ -279,7 +282,16 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 	var randBytes [8]byte
 	_, _ = rand.Read(randBytes[:])
 	testSessionID := fmt.Sprintf("ext_%d_%s", time.Now().UnixNano(), hex.EncodeToString(randBytes[:]))
-	tenant := "default"
+	tenant := strings.TrimSpace(req.Tenant)
+	if tenant == "" {
+		tenant = strings.TrimSpace(r.Header.Get("X-HadesGate-Tenant"))
+	}
+	if tenant == "" {
+		tenant = "default"
+	}
+	principal := principalFromRequest(r)
+	tenantName := s.resolveTenantName(tenant)
+
 	var tenantPolicy *policy.Engine
 	if s.gateway != nil {
 		tenantPolicy = s.gateway.PolicyForTenant(tenant)
@@ -333,6 +345,9 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 			s.gateway.Traces().Record(observability.Trace{
 				ID:              testSessionID,
 				Tenant:          tenant,
+				TenantName:      tenantName,
+				UserLabel:       principal.Label,
+				UserRole:        string(principal.Role),
 				PolicyAction:    "block",
 				Timestamp:       start,
 				Provider:        provider,
@@ -365,6 +380,9 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 		s.gateway.Traces().Record(observability.Trace{
 			ID:              testSessionID,
 			Tenant:          tenant,
+			TenantName:      tenantName,
+			UserLabel:       principal.Label,
+			UserRole:        string(principal.Role),
 			PolicyAction:    string(decision.Action),
 			Timestamp:       start,
 			Provider:        provider,
@@ -407,7 +425,20 @@ func (s *Server) handlePlaygroundProxy(w http.ResponseWriter, r *http.Request) {
 	if tenant == "" {
 		tenant = "default"
 	}
-	s.gateway.DispatchPreAuthenticated(w, r, tenant, subPath)
+	principal := principalFromRequest(r)
+	ctx := proxy.ContextWithUser(r.Context(), principal.Label, string(principal.Role))
+	s.gateway.DispatchPreAuthenticated(w, r.WithContext(ctx), tenant, subPath)
+}
+
+func (s *Server) resolveTenantName(tenant string) string {
+	if s.gateway != nil {
+		return s.gateway.ResolveTenantName(tenant)
+	}
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" || tenant == "default" || tenant == "*" {
+		return "GLOBAL"
+	}
+	return tenant
 }
 
 func telemetryPrompt(tenantPolicy *policy.Engine, sanitizedPrompt string) string {
@@ -474,6 +505,11 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		} else {
 			pagedTraces, totalCount = s.gateway.Traces().GetPagedForTenant(requestedTenant, limit, offset)
 			summary = s.gateway.Traces().GetSummaryForTenant(requestedTenant)
+		}
+		for i := range pagedTraces {
+			if pagedTraces[i].TenantName == "" {
+				pagedTraces[i].TenantName = s.resolveTenantName(pagedTraces[i].Tenant)
+			}
 		}
 		tracesList = pagedTraces
 		total = totalCount
@@ -557,8 +593,19 @@ func (s *Server) reloadGateway(ctx context.Context) error {
 	tenantKeys := make(map[string]string, len(tenants))
 	tenantPolicies := make(map[string]map[string]string, len(tenants))
 	tenantRateLimits := make(map[string]int, len(tenants))
+	tenantNames := make(map[string]string, len(tenants)*2)
 
 	for _, t := range tenants {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			name = t.ID
+		}
+		tenantNames[t.ID] = name
+		slug := strings.ToLower(strings.TrimSpace(t.Name))
+		if slug != "" {
+			tenantNames[slug] = name
+		}
+
 		tenantKeys[t.ID] = t.ProxyKey
 		tenantRateLimits[t.ID] = t.RateLimit
 
@@ -576,7 +623,6 @@ func (s *Server) reloadGateway(ctx context.Context) error {
 		tenantPolicies[t.ID] = combinedActions
 
 		// Also register slug/name mapping if non-empty
-		slug := strings.ToLower(strings.TrimSpace(t.Name))
 		if slug != "" && slug != strings.ToLower(t.ID) {
 			tenantKeys[slug] = t.ProxyKey
 			tenantRateLimits[slug] = t.RateLimit
@@ -585,6 +631,7 @@ func (s *Server) reloadGateway(ctx context.Context) error {
 	}
 
 	s.gateway.UpdateDynamicConfig(dynCfg.EntityActions, tenantKeys, tenantPolicies, tenantRateLimits, s.defaultRateLimit, dynCfg.GlobalProxyKey)
+	s.gateway.SetTenantNames(tenantNames)
 	s.gateway.UpdateThresholds(dynCfg.FamilyThresholds, dynCfg.EntityThresholds)
 
 	if s.upstream != nil {
@@ -645,6 +692,15 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		cleanWebhookURL := strings.TrimSpace(newCfg.WebhookURL)
+		if cleanWebhookURL != "" && cleanWebhookURL != "__CLEAR__" {
+			u, err := url.Parse(cleanWebhookURL)
+			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				http.Error(w, `{"error":{"message":"Endpoint URL do Webhook inválida. Deve iniciar com http:// ou https://"}}`, http.StatusBadRequest)
+				return
+			}
+		}
+
 		if err := s.store.SaveDynamicConfig(r.Context(), newCfg); err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
 			return
@@ -676,6 +732,7 @@ type dynamicConfigResponse struct {
 	GlobalProxyKeyConfigured bool               `json:"global_proxy_key_configured"`
 	WebhookURL               string             `json:"webhook_url"`
 	WebhookURLConfigured     bool               `json:"webhook_url_configured"`
+	WebhookURLPreview        string             `json:"webhook_url_preview,omitempty"`
 	WebhookSecret            string             `json:"webhook_secret"`
 	WebhookSecretConfigured  bool               `json:"webhook_secret_configured"`
 	WebhookEvents            []string           `json:"webhook_events"`
@@ -686,6 +743,18 @@ type dynamicConfigResponse struct {
 	EntityThresholds         map[string]float64 `json:"entity_thresholds,omitempty"`
 }
 
+func webhookPreview(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "[INVÁLIDO: " + raw + "]"
+	}
+	return u.Scheme + "://" + u.Host + "/*"
+}
+
 func publicDynamicConfig(cfg config.DynamicConfig, globalConfigured bool) dynamicConfigResponse {
 	return dynamicConfigResponse{
 		EntityActions:            cfg.EntityActions,
@@ -693,6 +762,7 @@ func publicDynamicConfig(cfg config.DynamicConfig, globalConfigured bool) dynami
 		GlobalProxyKeyConfigured: globalConfigured,
 		WebhookURL:               "",
 		WebhookURLConfigured:     cfg.WebhookURL != "",
+		WebhookURLPreview:        webhookPreview(cfg.WebhookURL),
 		WebhookSecret:            "",
 		WebhookSecretConfigured:  cfg.WebhookSecret != "",
 		WebhookEvents:            cfg.WebhookEvents,
@@ -974,11 +1044,27 @@ func (s *Server) handleWebhookTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.webhook.TestDispatch(webhook.Event{
+	var reqBody struct {
+		URL    string `json:"url"`
+		Secret string `json:"secret"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+	}
+
+	evt := webhook.Event{
 		Event:     "test_ping",
 		Timestamp: time.Now().UTC(),
 		Details:   "Disparo de teste manual originado do Console Web do HadesGate",
-	})
+	}
+
+	var err error
+	if strings.TrimSpace(reqBody.URL) != "" {
+		err = s.webhook.TestDispatchTarget(reqBody.URL, reqBody.Secret, evt)
+	} else {
+		err = s.webhook.TestDispatch(evt)
+	}
+
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]interface{}{

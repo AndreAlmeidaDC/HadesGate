@@ -18,6 +18,9 @@ import {
   Key,
   Copy,
   LockKeyhole,
+  Eye,
+  EyeOff,
+  ChevronDown,
 } from "lucide-react";
 import type { Language } from "@/lib/i18n";
 import { translations } from "@/lib/i18n";
@@ -39,6 +42,7 @@ interface DynamicConfig {
   global_proxy_key_configured: boolean;
   webhook_url: string;
   webhook_url_configured: boolean;
+  webhook_url_preview?: string;
   webhook_secret: string;
   webhook_secret_configured: boolean;
   webhook_events: string[];
@@ -150,6 +154,25 @@ const KNOWN_ENTITIES: KnownEntity[] = [
   { id: "CODICE_FISCALE", label: "Codice Fiscale (Identificador Fiscal Italiano)", family: "INTL" },
 ];
 
+function getActionColorClass(action: string): string {
+  switch (action) {
+    case "mask":
+      return "border-purple-600 bg-purple-950/30 text-purple-300 hover:border-purple-500";
+    case "contextual":
+      return "border-cyan-600 bg-cyan-950/30 text-cyan-300 hover:border-cyan-500";
+    case "block":
+      return "border-red-600 bg-red-950/30 text-red-300 hover:border-red-500";
+    case "route_local":
+      return "border-amber-600 bg-amber-950/30 text-amber-300 hover:border-amber-500";
+    case "disabled":
+      return "border-red-500 bg-red-950/60 text-red-200 hover:border-red-400";
+    case "inherit":
+      return "border-zinc-700 bg-zinc-900 text-zinc-400 hover:border-zinc-500";
+    default:
+      return "border-border bg-card text-foreground";
+  }
+}
+
 export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) {
   const t = translations[lang];
 
@@ -191,6 +214,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
     global_proxy_key_configured: false,
     webhook_url: "",
     webhook_url_configured: false,
+    webhook_url_preview: "",
     webhook_secret: "",
     webhook_secret_configured: false,
     webhook_events: ["block", "egress_leak", "rate_limit"],
@@ -222,8 +246,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
   const [savingTenant, setSavingTenant] = useState<boolean>(false);
   const [rotatedGlobalKey, setRotatedGlobalKey] = useState<string>("");
 
-  // Webhook test state
+  // Webhook state
   const [testingWebhook, setTestingWebhook] = useState<boolean>(false);
+  const [clearingWebhook, setClearingWebhook] = useState<boolean>(false);
+  const [showWebhookSecret, setShowWebhookSecret] = useState<boolean>(false);
 
   // ANVISA catalog state
   const [anvisaStatus, setAnvisaStatus] = useState<AnvisaStatus | null>(null);
@@ -264,6 +290,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
           global_proxy_key_configured: !!data.global_proxy_key_configured,
           webhook_url: data.webhook_url || "",
           webhook_url_configured: !!data.webhook_url_configured,
+          webhook_url_preview: data.webhook_url_preview || "",
           webhook_secret: data.webhook_secret || "",
           webhook_secret_configured: !!data.webhook_secret_configured,
           webhook_events: data.webhook_events || [
@@ -302,7 +329,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             setAnvisaStatus(data);
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     } catch (err: any) {
       notify(
         "error",
@@ -330,10 +357,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         const err = await res.json();
         throw new Error(err.error?.message || "Erro desconhecido");
       }
-	  const data = await res.json();
-	  if (data.config) {
-		setConfig({ ...data.config, global_proxy_key: "", webhook_secret: "" });
-	  }
+      const data = await res.json();
+      if (data.config) {
+        setConfig({ ...data.config, global_proxy_key: "", webhook_secret: "" });
+      }
 
       notify(
         "success",
@@ -356,6 +383,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          url: config.webhook_url.trim() || undefined,
+          secret: config.webhook_secret.trim() || undefined,
+        }),
       });
 
       const data = await res.json();
@@ -372,6 +403,48 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
       notify("error", `${t.settings.webhookFailed}${err.message}`);
     } finally {
       setTestingWebhook(false);
+    }
+  };
+
+  const handleClearWebhook = async () => {
+    if (!confirm("Tem certeza que deseja remover o webhook configurado?")) {
+      return;
+    }
+    setClearingWebhook(true);
+    try {
+      const res = await fetch(`${gatewayUrl}/api/config`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...config,
+          webhook_url: "__CLEAR__",
+          webhook_secret: "__CLEAR__",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || "Falha ao limpar webhook");
+      }
+      setConfig((prev) => ({
+        ...prev,
+        webhook_url: "",
+        webhook_url_configured: false,
+        webhook_url_preview: "",
+        webhook_secret: "",
+        webhook_secret_configured: false,
+      }));
+      notify(
+        "success",
+        "Webhook e segredo HMAC removidos com sucesso.",
+        "HADESGATE // WEBHOOK REMOVIDO"
+      );
+    } catch (err: any) {
+      notify("error", `Erro ao limpar webhook: ${err.message}`);
+    } finally {
+      setClearingWebhook(false);
     }
   };
 
@@ -405,12 +478,12 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         throw new Error("Falha ao salvar rotação da chave global");
       }
 
-	  const data = await res.json();
-	  if (data.config) {
-		setConfig({ ...data.config, global_proxy_key: "", webhook_secret: "" });
-	  }
-	  setRotatedGlobalKey(newKey);
-	  await navigator.clipboard.writeText(newKey);
+      const data = await res.json();
+      if (data.config) {
+        setConfig({ ...data.config, global_proxy_key: "", webhook_secret: "" });
+      }
+      setRotatedGlobalKey(newKey);
+      await navigator.clipboard.writeText(newKey);
 
       notify(
         "success",
@@ -455,7 +528,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         id: "",
         name: payload.name,
         proxy_key: payload.proxy_key,
-		proxy_key_configured: true,
+        proxy_key_configured: true,
         rate_limit: payload.rate_limit,
         entity_actions: {},
       };
@@ -510,13 +583,13 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         const err = await res.json();
         throw new Error(err.error?.message || "Falha ao atualizar tenant");
       }
-	  const responseData = await res.json();
-	  const updatedTenant: TenantConfig = responseData.tenant;
+      const responseData = await res.json();
+      const updatedTenant: TenantConfig = responseData.tenant;
 
       setTenants((prev) =>
         prev.map((tItem) =>
           tItem.id === editingTenant.id
-			? updatedTenant
+            ? updatedTenant
             : tItem
         )
       );
@@ -613,7 +686,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
     }
   };
 
-  const handleEntityActionChange = (entity: string, action: string) => {
+  const handleEntityActionChange = (
+    entity: string,
+    action: string,
+    skipNotify = false
+  ) => {
     setConfig((prev) => ({
       ...prev,
       entity_actions: {
@@ -621,6 +698,14 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         [entity]: action,
       },
     }));
+
+    if (!skipNotify) {
+      if (action === "disabled") {
+        notify("error", t.settings.disabledWarning, "ATENÇÃO // DESATIVAR DLP");
+      } else if (action === "contextual") {
+        notify("info", t.settings.contextualDescription, "INFO // CONTEXTUAL PHI");
+      }
+    }
   };
 
   const handleFamilyBatchAction = (familyId: string, action: string) => {
@@ -635,6 +720,24 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         entity_actions: updatedActions,
       };
     });
+
+    if (action === "disabled") {
+      notify("error", t.settings.disabledWarning, "ATENÇÃO // DESATIVAR DLP (LOTE)");
+    } else if (action === "contextual") {
+      notify("info", t.settings.contextualDescription, "INFO // CONTEXTUAL PHI (LOTE)");
+    }
+  };
+
+  const handleBatchContextualGlobal = () => {
+    setConfig((prev) => ({
+      ...prev,
+      entity_actions: {
+        ...prev.entity_actions,
+        CID: "contextual",
+        MEDICATION: "contextual",
+      },
+    }));
+    notify("info", t.settings.contextualDescription, "INFO // CONTEXTUAL PHI (LOTE)");
   };
 
   const handleFamilyThresholdChange = (familyId: string, val: number) => {
@@ -698,6 +801,21 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
       }
       return updated;
     });
+
+    if (action === "disabled") {
+      notify("error", t.settings.disabledWarning, "ATENÇÃO // DESATIVAR DLP (LOTE)");
+    } else if (action === "contextual") {
+      notify("info", t.settings.contextualDescription, "INFO // CONTEXTUAL PHI (LOTE)");
+    }
+  };
+
+  const handleBatchContextualTenant = () => {
+    setEditTenantActions((prev) => ({
+      ...prev,
+      CID: "contextual",
+      MEDICATION: "contextual",
+    }));
+    notify("info", t.settings.contextualDescription, "INFO // CONTEXTUAL PHI (LOTE)");
   };
 
   const handleSyncAnvisa = async () => {
@@ -739,7 +857,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
     }
   };
 
-  const handleTenantActionChange = (entity: string, action: string) => {
+  const handleTenantActionChange = (
+    entity: string,
+    action: string,
+    skipNotify = false
+  ) => {
     setEditTenantActions((prev) => {
       const updated = { ...prev };
       if (!action || action === "inherit") {
@@ -749,6 +871,14 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
       }
       return updated;
     });
+
+    if (!skipNotify) {
+      if (action === "disabled") {
+        notify("error", t.settings.disabledWarning, "ATENÇÃO // DESATIVAR DLP");
+      } else if (action === "contextual") {
+        notify("info", t.settings.contextualDescription, "INFO // CONTEXTUAL PHI");
+      }
+    }
   };
 
   const handleWebhookEventToggle = (event: string) => {
@@ -819,11 +949,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             <button
               key={tab.id}
               onClick={() => setActiveSubTab(tab.id as any)}
-              className={`flex-1 min-w-[150px] py-3 px-4 font-mono text-xs font-bold uppercase tracking-[0.08em] flex items-center justify-center gap-2 transition-colors ${
-                active
-                  ? "bg-purple-700 text-white"
-                  : "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
-              }`}
+              className={`flex-1 min-w-[150px] py-3 px-4 font-mono text-xs font-bold uppercase tracking-[0.08em] flex items-center justify-center gap-2 transition-colors ${active
+                ? "bg-purple-700 text-white"
+                : "bg-transparent text-muted-foreground hover:bg-secondary hover:text-foreground"
+                }`}
             >
               <Icon className="h-4 w-4" />
               <span>{tab.label}</span>
@@ -844,10 +973,6 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             </span>
           </div>
 
-          <div className="border-2 border-red-700 bg-red-950/20 p-3 font-mono text-[11px] font-bold uppercase text-red-300">
-            {t.settings.disabledWarning}
-          </div>
-
           {/* Family Filters Bar */}
           <div className="flex flex-wrap items-center gap-1.5 p-2 bg-secondary/50 border border-border">
             <span className="font-mono text-[10px] uppercase font-bold text-muted-foreground mr-1">
@@ -856,11 +981,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             <button
               type="button"
               onClick={() => setSelectedFamilyFilter("ALL")}
-              className={`px-2.5 py-1 font-mono text-[11px] uppercase font-bold border transition-colors ${
-                selectedFamilyFilter === "ALL"
-                  ? "border-purple-600 bg-purple-700 text-white"
-                  : "border-border bg-secondary text-muted-foreground hover:text-foreground"
-              }`}
+              className={`px-2.5 py-1 font-mono text-[11px] uppercase font-bold border transition-colors ${selectedFamilyFilter === "ALL"
+                ? "border-purple-600 bg-purple-700 text-white"
+                : "border-border bg-secondary text-muted-foreground hover:text-foreground"
+                }`}
             >
               {t.settings.allFamilies} ({KNOWN_ENTITIES.length})
             </button>
@@ -872,11 +996,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                   key={fam.id}
                   type="button"
                   onClick={() => setSelectedFamilyFilter(fam.id)}
-                  className={`px-2 py-1 font-mono text-[10px] uppercase font-bold border transition-colors ${
-                    isSelected
-                      ? "border-purple-600 bg-purple-700 text-white"
-                      : "border-border bg-secondary text-muted-foreground hover:text-foreground"
-                  }`}
+                  className={`px-2 py-1 font-mono text-[10px] uppercase font-bold border transition-colors ${isSelected
+                    ? "border-purple-600 bg-purple-700 text-white"
+                    : "border-border bg-secondary text-muted-foreground hover:text-foreground"
+                    }`}
                 >
                   {fam.id} ({count})
                 </button>
@@ -944,11 +1067,19 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                         >
                           {t.settings.setAllRouteLocal}
                         </button>
+                        {fam.id === "HEALTH_PHI" && (
+                          <button
+                            type="button"
+                            onClick={handleBatchContextualGlobal}
+                            className="px-2 h-6 border border-cyan-600 bg-cyan-700/20 hover:bg-cyan-700 text-cyan-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
+                          >
+                            {t.settings.setAllContextual}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleFamilyBatchAction(fam.id, "disabled")}
                           className="px-2 h-6 border border-red-500 bg-red-950/30 hover:bg-red-700 text-red-300 hover:text-white font-mono text-[10px] uppercase font-bold transition-colors"
-                          title={t.settings.disabledWarning}
                         >
                           {t.settings.setAllDisabled}
                         </button>
@@ -1056,37 +1187,31 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                                 <span>{ent.label}</span>
                               </td>
                               <td className="py-2 px-3 whitespace-nowrap">
-                                <div className="flex items-center gap-1 flex-nowrap">
-                                  {[
-                                    { id: "mask", label: t.settings.mask },
-                                    { id: "block", label: t.settings.block },
-                                    { id: "route_local", label: t.settings.routeLocal },
-                                    { id: "disabled", label: t.settings.disabled },
-                                  ].map((act) => {
-                                    const isSelected = currentAction === act.id;
-                                    let btnStyle = "border-border bg-secondary text-muted-foreground";
-                                    if (isSelected) {
-                                      if (act.id === "mask") {
-                                        btnStyle = "border-purple-600 bg-purple-700 text-white font-bold";
-                                      } else if (act.id === "block") {
-                                        btnStyle = "border-red-600 bg-red-700 text-white font-bold";
-                                      } else if (act.id === "route_local") {
-                                        btnStyle = "border-amber-600 bg-amber-700 text-white font-bold";
-                                      } else if (act.id === "disabled") {
-                                        btnStyle = "border-red-400 bg-red-950 text-red-200 font-bold";
-                                      }
-                                    }
-                                    return (
-                                      <button
-                                        key={act.id}
-                                        type="button"
-                                        onClick={() => handleEntityActionChange(ent.id, act.id)}
-                                        className={`px-2.5 h-6 whitespace-nowrap text-[11px] font-mono uppercase border transition-colors flex items-center justify-center shrink-0 ${btnStyle}`}
-                                      >
-                                        {act.label}
-                                      </button>
-                                    );
-                                  })}
+                                <div className="relative inline-block w-44 sm:w-48">
+                                  <select
+                                    value={currentAction}
+                                    onChange={(e) => handleEntityActionChange(ent.id, e.target.value)}
+                                    className={`w-full h-7 pl-2.5 pr-7 font-mono text-[11px] font-bold uppercase border transition-colors focus:outline-none cursor-pointer appearance-none ${getActionColorClass(currentAction)}`}
+                                  >
+                                    <option value="mask" className="bg-zinc-950 text-purple-300 font-mono py-1">
+                                      {t.settings.mask}
+                                    </option>
+                                    {CONTEXTUAL_HEALTH_ENTITIES.has(ent.id) && (
+                                      <option value="contextual" className="bg-zinc-950 text-cyan-300 font-mono py-1">
+                                        {t.settings.contextual}
+                                      </option>
+                                    )}
+                                    <option value="block" className="bg-zinc-950 text-red-300 font-mono py-1">
+                                      {t.settings.block}
+                                    </option>
+                                    <option value="route_local" className="bg-zinc-950 text-amber-300 font-mono py-1">
+                                      {t.settings.routeLocal}
+                                    </option>
+                                    <option value="disabled" className="bg-zinc-950 text-red-400 font-mono py-1">
+                                      {t.settings.disabled}
+                                    </option>
+                                  </select>
+                                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 opacity-70 text-foreground" />
                                 </div>
                               </td>
                               <td className="py-2 px-3 whitespace-nowrap">
@@ -1597,10 +1722,6 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                   </button>
                 </div>
 
-                <div className="border-2 border-red-700 bg-red-950/20 p-2.5 font-mono text-[10px] font-bold uppercase text-red-300">
-                  {t.settings.disabledWarning}
-                </div>
-
                 <div className="overflow-x-auto max-h-80 overflow-y-auto space-y-4">
                   {MACRO_FAMILIES.map((fam) => {
                     const entitiesInFamily = KNOWN_ENTITIES.filter((e) => e.family === fam.id);
@@ -1642,11 +1763,19 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                             >
                               {t.settings.routeLocal}
                             </button>
+                            {fam.id === "HEALTH_PHI" && (
+                              <button
+                                type="button"
+                                onClick={handleBatchContextualTenant}
+                                className="px-1.5 h-5 border border-cyan-600/50 bg-cyan-700/20 text-[9px] font-mono uppercase text-cyan-300 hover:text-white"
+                              >
+                                {t.settings.contextual}
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleTenantFamilyBatchAction(fam.id, "disabled")}
                               className="px-1.5 h-5 border border-red-500 bg-red-950/30 text-[9px] font-mono uppercase text-red-300 hover:text-white"
-                              title={t.settings.disabledWarning}
                             >
                               {t.settings.setAllDisabled}
                             </button>
@@ -1672,48 +1801,41 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                                       {globalAction === "block"
                                         ? t.settings.block
                                         : globalAction === "route_local"
-                                        ? t.settings.routeLocal
-                                        : globalAction === "disabled"
-                                        ? t.settings.disabled
-                                        : t.settings.mask}
+                                          ? t.settings.routeLocal
+                                          : globalAction === "disabled"
+                                            ? t.settings.disabled
+                                            : t.settings.mask}
                                     </span>
                                   </td>
                                   <td className="py-1.5 px-2 whitespace-nowrap">
-                                    <div className="flex items-center gap-1 flex-nowrap">
-                                      {[
-                                        { id: "inherit", label: t.settings.inheritGlobal },
-                                        { id: "mask", label: t.settings.mask },
-                                        { id: "block", label: t.settings.block },
-                                        { id: "route_local", label: t.settings.routeLocal },
-                                        { id: "disabled", label: t.settings.disabled },
-                                      ].map((act) => {
-                                        const isSelected = tenantAction === act.id;
-                                        let btnClass = "border-border bg-secondary text-muted-foreground";
-                                        if (isSelected) {
-                                          if (act.id === "inherit") {
-                                            btnClass = "border-zinc-500 bg-zinc-700 text-white font-bold";
-                                          } else if (act.id === "mask") {
-                                            btnClass = "border-purple-600 bg-purple-700 text-white font-bold";
-                                          } else if (act.id === "block") {
-                                            btnClass = "border-red-600 bg-red-700 text-white font-bold";
-                                          } else if (act.id === "route_local") {
-                                            btnClass = "border-amber-600 bg-amber-700 text-white font-bold";
-                                          } else if (act.id === "disabled") {
-                                            btnClass = "border-red-400 bg-red-950 text-red-200 font-bold";
-                                          }
-                                        }
-
-                                        return (
-                                          <button
-                                            key={act.id}
-                                            type="button"
-                                            onClick={() => handleTenantActionChange(ent.id, act.id)}
-                                            className={`px-2 h-5 whitespace-nowrap text-[9px] font-mono uppercase border transition-colors flex items-center justify-center shrink-0 ${btnClass}`}
-                                          >
-                                            {act.label}
-                                          </button>
-                                        );
-                                      })}
+                                    <div className="relative inline-block w-44 sm:w-48">
+                                      <select
+                                        value={tenantAction}
+                                        onChange={(e) => handleTenantActionChange(ent.id, e.target.value)}
+                                        className={`w-full h-6 pl-2 pr-6 font-mono text-[10px] font-bold uppercase border transition-colors focus:outline-none cursor-pointer appearance-none ${getActionColorClass(tenantAction)}`}
+                                      >
+                                        <option value="inherit" className="bg-zinc-950 text-zinc-300 font-mono py-1">
+                                          {t.settings.inheritGlobal}
+                                        </option>
+                                        <option value="mask" className="bg-zinc-950 text-purple-300 font-mono py-1">
+                                          {t.settings.mask}
+                                        </option>
+                                        {CONTEXTUAL_HEALTH_ENTITIES.has(ent.id) && (
+                                          <option value="contextual" className="bg-zinc-950 text-cyan-300 font-mono py-1">
+                                            {t.settings.contextual}
+                                          </option>
+                                        )}
+                                        <option value="block" className="bg-zinc-950 text-red-300 font-mono py-1">
+                                          {t.settings.block}
+                                        </option>
+                                        <option value="route_local" className="bg-zinc-950 text-amber-300 font-mono py-1">
+                                          {t.settings.routeLocal}
+                                        </option>
+                                        <option value="disabled" className="bg-zinc-950 text-red-400 font-mono py-1">
+                                          {t.settings.disabled}
+                                        </option>
+                                      </select>
+                                      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 opacity-70 text-foreground" />
                                     </div>
                                   </td>
                                 </tr>
@@ -1759,16 +1881,41 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
         <div className="border-2 border-zinc-900 dark:border-[#38384A] bg-card p-6 space-y-6">
           <div className="space-y-4">
             <div>
-              <label className="block font-mono text-xs font-bold uppercase text-foreground mb-1">
-                ENDPOINT URL DO WEBHOOK (DISCORD, SLACK, TEAMS, SIEM)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  htmlFor="hadesgate_webhook_target_url"
+                  className="block font-mono text-xs font-bold uppercase text-foreground"
+                >
+                  ENDPOINT URL DO WEBHOOK (DISCORD, SLACK, TEAMS, SIEM)
+                </label>
+                {config.webhook_url_preview && (
+                  <span
+                    className={`font-mono text-[10px] uppercase px-1.5 py-0.5 border ${config.webhook_url_preview.startsWith("[INVÁLIDO")
+                      ? "border-rose-500/60 bg-rose-950/40 text-rose-300"
+                      : "border-purple-600/40 bg-purple-950/20 text-purple-300"
+                      }`}
+                  >
+                    {config.webhook_url_preview}
+                  </span>
+                )}
+              </div>
               <input
-                type="url"
-				placeholder={
-				  config.webhook_url_configured
-					? t.settings.secretUnchanged
-					: "https://discord.com/api/webhooks/..."
-				}
+                id="hadesgate_webhook_target_url"
+                name="hadesgate_webhook_target_url"
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
+                placeholder={
+                  config.webhook_url_configured
+                    ? t.settings.secretUnchanged
+                    : "https://discord.com/api/webhooks/..."
+                }
                 value={config.webhook_url}
                 onChange={(e) =>
                   setConfig((prev) => ({
@@ -1778,19 +1925,49 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                 }
                 className="w-full h-10 px-3 border border-border bg-secondary font-mono text-xs text-foreground focus:outline-none focus:border-purple-600"
               />
-			  <span className="block mt-1 font-mono text-[9px] uppercase text-muted-foreground">
-				{config.webhook_url_configured
-				  ? t.settings.secretConfigured
-				  : t.settings.secretNotConfigured}
-			  </span>
+              <span className="block mt-1 font-mono text-[9px] uppercase text-muted-foreground">
+                {config.webhook_url_configured
+                  ? t.settings.secretConfigured
+                  : t.settings.secretNotConfigured}
+              </span>
             </div>
 
             <div>
-              <label className="block font-mono text-xs font-bold uppercase text-foreground mb-1">
-                SEGREDO CRIPTOGRÁFICO HMAC-SHA256 (OPCIONAL)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  htmlFor="hadesgate_webhook_signing_key"
+                  className="block font-mono text-xs font-bold uppercase text-foreground"
+                >
+                  SEGREDO CRIPTOGRÁFICO HMAC-SHA256 (OPCIONAL)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowWebhookSecret(!showWebhookSecret)}
+                  className="font-mono text-[10px] uppercase text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                >
+                  {showWebhookSecret ? (
+                    <EyeOff className="h-3 w-3" />
+                  ) : (
+                    <Eye className="h-3 w-3" />
+                  )}
+                  <span>{showWebhookSecret ? "Ocultar" : "Exibir"}</span>
+                </button>
+              </div>
               <input
-                type="password"
+                id="hadesgate_webhook_signing_key"
+                name="hadesgate_webhook_signing_key"
+                type="text"
+                style={{
+                  WebkitTextSecurity: showWebhookSecret ? "none" : "disc",
+                } as React.CSSProperties}
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
                 placeholder={
                   config.webhook_secret_configured
                     ? t.settings.secretUnchanged
@@ -1840,19 +2017,17 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                       key={item.id}
                       type="button"
                       onClick={() => handleWebhookEventToggle(item.id)}
-                      className={`p-3 text-left border transition-colors ${
-                        active
-                          ? "border-purple-600 bg-purple-950/20 text-foreground"
-                          : "border-border bg-secondary/50 text-muted-foreground"
-                      }`}
+                      className={`p-3 text-left border transition-colors ${active
+                        ? "border-purple-600 bg-purple-950/20 text-foreground"
+                        : "border-border bg-secondary/50 text-muted-foreground"
+                        }`}
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <span
-                          className={`h-2.5 w-2.5 rounded-none border ${
-                            active
-                              ? "bg-purple-600 border-purple-600"
-                              : "border-border bg-transparent"
-                          }`}
+                          className={`h-2.5 w-2.5 rounded-none border ${active
+                            ? "bg-purple-600 border-purple-600"
+                            : "border-border bg-transparent"
+                            }`}
                         />
                         <span className="font-mono text-xs font-bold">
                           {item.label}
@@ -1867,11 +2042,11 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
               </div>
             </div>
 
-            <div className="pt-2 flex items-center gap-3">
+            <div className="pt-2 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={handleTestWebhook}
-				disabled={testingWebhook || (!config.webhook_url && !config.webhook_url_configured)}
+                disabled={testingWebhook || (!config.webhook_url && !config.webhook_url_configured)}
                 className="h-9 px-4 border border-zinc-700 bg-secondary hover:border-purple-600 text-foreground font-mono text-xs font-bold uppercase tracking-[0.08em] flex items-center gap-2 transition-colors disabled:opacity-40"
               >
                 {testingWebhook ? (
@@ -1885,6 +2060,22 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                     : t.settings.testWebhook}
                 </span>
               </button>
+
+              {(config.webhook_url_configured || config.webhook_secret_configured || config.webhook_url) && (
+                <button
+                  type="button"
+                  onClick={handleClearWebhook}
+                  disabled={clearingWebhook}
+                  className="h-9 px-4 border border-rose-900/60 bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 font-mono text-xs font-bold uppercase tracking-[0.08em] flex items-center gap-2 transition-colors disabled:opacity-40"
+                >
+                  {clearingWebhook ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>Remover Webhook</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1912,11 +2103,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                   enable_egress_scan: !prev.enable_egress_scan,
                 }))
               }
-              className={`px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.08em] border transition-colors ${
-                config.enable_egress_scan
-                  ? "bg-purple-700 text-white border-purple-700"
-                  : "bg-secondary text-muted-foreground border-border hover:border-purple-600"
-              }`}
+              className={`px-4 py-2 font-mono text-xs font-bold uppercase tracking-[0.08em] border transition-colors ${config.enable_egress_scan
+                ? "bg-purple-700 text-white border-purple-700"
+                : "bg-secondary text-muted-foreground border-border hover:border-purple-600"
+                }`}
             >
               {config.enable_egress_scan ? "ATIVADO // ON" : "DESATIVADO // OFF"}
             </button>

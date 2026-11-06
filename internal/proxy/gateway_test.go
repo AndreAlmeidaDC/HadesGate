@@ -518,6 +518,84 @@ func TestGateway_DisabledDLPActionAppliesToStreamingRequests(t *testing.T) {
 	}
 }
 
+func TestGateway_ContextualHealthPolicyForStreamingAndNonStreaming(t *testing.T) {
+	tests := []struct {
+		name                   string
+		stream                 bool
+		prompt                 string
+		actions                map[string]string
+		medication             string
+		person                 string
+		wantMedicationUpstream bool
+	}{
+		{name: "standalone non-streaming", prompt: "Crie uma receita de Amoxicilina 500mg.", wantMedicationUpstream: true},
+		{name: "linked non-streaming", prompt: "Paciente João Pedro dos Santos deve tomar Amoxicilina 500mg.", wantMedicationUpstream: false},
+		{name: "standalone streaming", stream: true, prompt: "Crie uma receita de Amoxicilina 500mg.", wantMedicationUpstream: true},
+		{name: "linked streaming", stream: true, prompt: "Paciente João Pedro dos Santos deve tomar Amoxicilina 500mg.", wantMedicationUpstream: false},
+		{name: "explicit mask override", prompt: "Crie uma receita de Amoxicilina 500mg.", actions: map[string]string{"MEDICATION": "mask"}, wantMedicationUpstream: false},
+		{name: "disabled identity still anchors health", prompt: "Paciente João Pedro dos Santos deve tomar Amoxicilina 500mg.", actions: map[string]string{"PERSON": "disabled"}, wantMedicationUpstream: false},
+		{name: "fully lowercase name remains linked", prompt: "gere uma receita de dipirona 1g para roberto da silva", medication: "dipirona", person: "roberto da silva", wantMedicationUpstream: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var upstreamText string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload map[string]interface{}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode upstream request: %v", err)
+				}
+				for _, rawMessage := range payload["messages"].([]interface{}) {
+					message := rawMessage.(map[string]interface{})
+					if message["role"] == "user" {
+						upstreamText, _ = message["content"].(string)
+					}
+				}
+				if test.stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": "chatcmpl-contextual", "choices": []interface{}{map[string]interface{}{"message": map[string]interface{}{"role": "assistant", "content": "ok"}}}})
+			}))
+			defer server.Close()
+
+			v := vault.NewMemoryVault(time.Minute)
+			defer v.Close()
+			engine := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+			traces := observability.NewTraceLogger(10)
+			defer traces.Close()
+			upstream := NewUpstreamDispatcher(UpstreamConfig{OpenAIBaseURL: server.URL, OpenAIKey: "upstream-key"})
+			gateway := NewGatewayWithOptions(engine, upstream, traces, GatewayOptions{GlobalProxyKey: "global-key", EntityActions: test.actions})
+			body, _ := json.Marshal(map[string]interface{}{"model": "gpt-4o", "stream": test.stream, "messages": []interface{}{map[string]interface{}{"role": "user", "content": test.prompt}}})
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+			request.Header.Set("Authorization", "Bearer global-key")
+			response := httptest.NewRecorder()
+			gateway.HandleChatCompletions(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("request failed: %d %s", response.Code, response.Body.String())
+			}
+			medication := test.medication
+			if medication == "" {
+				medication = "Amoxicilina"
+			}
+			containsMedication := strings.Contains(upstreamText, medication)
+			if containsMedication != test.wantMedicationUpstream {
+				t.Fatalf("unexpected upstream health payload %q", upstreamText)
+			}
+			if !test.wantMedicationUpstream && !strings.Contains(upstreamText, "[HG_") {
+				t.Fatalf("protected health context did not contain placeholders: %q", upstreamText)
+			}
+			if test.person != "" && strings.Contains(upstreamText, test.person) {
+				t.Fatalf("linked person reached upstream without masking: %q", upstreamText)
+			}
+			if test.person != "" && (!strings.Contains(upstreamText, "_PERSON_") || !strings.Contains(upstreamText, "_MEDICATION_")) {
+				t.Fatalf("expected linked PERSON and MEDICATION placeholders upstream: %q", upstreamText)
+			}
+		})
+	}
+}
+
 func TestGateway_PathAndKeyRouting(t *testing.T) {
 	base := newTestGateway("default-key", nil)
 	gw := NewGatewayWithOptions(base.engine, nil, base.traces, GatewayOptions{

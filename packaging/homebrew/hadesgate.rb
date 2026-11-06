@@ -5,7 +5,7 @@ class Hadesgate < Formula
   desc "Zero-PII Privacy Gateway & Tactical Shield for LLMs (OpenAI, Anthropic, Gemini)"
   homepage "https://hadesgate.dev"
   version "2.0.0"
-  license "Apache-2.0"
+  license "AGPL-3.0-only"
 
   on_macos do
     if Hardware::CPU.intel?

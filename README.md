@@ -17,7 +17,7 @@
 [![CGO](https://img.shields.io/badge/CGO__ENABLED-0-7E22CE?style=flat-square)](#-arquitetura)
 [![SQLite](https://img.shields.io/badge/SQLite-Zero--PII-003B57?style=flat-square&logo=sqlite&logoColor=white)](#-telemetria-zero-pii)
 [![LGPD](https://img.shields.io/badge/LGPD-ready-10B981?style=flat-square)](#-detectores)
-[![License](https://img.shields.io/badge/license-a%20definir-lightgrey?style=flat-square)](#-licença)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--only-7E22CE?style=flat-square)](./LICENSE)
 
 [Como funciona](#-como-funciona) ·
 [Início rápido](#-início-rápido) ·
@@ -65,7 +65,8 @@ Tudo isso num **binário Go estático**, sem Python, sem modelo de NLP pesado e 
 | 🔐 **Tokens imprevisíveis** | Namespace aleatório (`crypto/rand`) por requisição — impossível correlacionar conversas. |
 | 🧠 **Deduplicação canônica** | `529.982.247-25` e `52998224725` viram o **mesmo** token, preservando o raciocínio do LLM. |
 | 🗄️ **Telemetria Zero-PII** | SQLite em Go puro guarda só métricas e o prompt já mascarado. Nunca o dado real. |
-| 🎛️ **Políticas por entidade** | `mask`, `block`, `route_local` ou `disabled` por tipo de dado e por tenant. |
+| 🎛️ **Políticas por entidade** | `mask`, `contextual`, `block`, `route_local` ou `disabled` por tipo de dado e por tenant. |
+| 🩺 **Saúde contextual** | Medicamentos e CIDs só são protegidos quando ligados a uma identidade no mesmo trecho; consultas clínicas genéricas continuam úteis. |
 | 🖥️ **Dashboard embutido** | Console em estilo *Industrial Brutalism*, dark mode padrão, PT-BR/EN, servido pelo próprio binário. |
 
 ---
@@ -173,7 +174,7 @@ Depois de subir:
 | E-mail | `EMAIL` | RFC 5322 |
 | CEP | `CEP` | Formato dos Correios + contexto |
 | Endereço IP | `IP_ADDRESS` | IPv4 / IPv6, ignorando números de versão |
-| Nome próprio | `PERSON` | Heurística contextual |
+| Nome próprio | `PERSON` | Contexto + catálogo de nomes/sobrenomes; aceita caixa livre e até oito partes substantivas |
 | US SSN | `SSN` | Validação SSA (regras de área, grupo, serial e dummies) |
 | US EIN | `EIN` | Validação de prefixos de campus IRS |
 | UK NINO | `NINO` | Regras oficiais HMRC (prefixos, caracteres proibidos e sufixo) |
@@ -358,7 +359,7 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Upstream Google Gemini |
 | `GEMINI_API_KEY` | — | Chave do upstream Google Gemini (ou `GOOGLE_API_KEY`) |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434/v1` | Endpoint local (também usado por `route_local`) |
-| `HADESGATE_ENTITY_ACTIONS` | `mask` | Ex.: `CREDIT_CARD:block,API_KEY:mask,VEHICLE:disabled` |
+| `HADESGATE_ENTITY_ACTIONS` | `mask` | Ex.: `CREDIT_CARD:block,MEDICATION:contextual,VEHICLE:disabled` |
 | `HADESGATE_TENANT_ENTITY_ACTIONS` | — | Overrides por tenant; ex.: `analytics|VEHICLE:disabled;financeiro|CPF:block` |
 | `HADESGATE_TENANT_PROXY_KEYS` | — | Chaves por tenant (`tenant:chave`) |
 | `HADESGATE_ALLOW_DYNAMIC_UPSTREAM` | `false` | Habilita o header `X-Upstream-Url` |
@@ -372,6 +373,9 @@ Todas as opções via variáveis de ambiente (veja [`.env.example`](./.env.examp
 | `SEMANTIC_DETECTOR_ENABLED` | `false` | Sidecar semântico opcional |
 
 > Variáveis legadas `PRIVAGATE_*` continuam aceitas como fallback.
+
+> [!NOTE]
+> A ação `contextual` é segura por padrão apenas para `MEDICATION` e `CID`. Termos isolados, como “Amoxicilina 500 mg” ou “CID J45.0”, podem seguir ao modelo; quando aparecem no mesmo trecho de uma identidade direta (nome, CPF, e-mail, telefone, SUS ou prontuário), ambos permanecem no fluxo normal de mascaramento. `SUS_CARD` e `MEDICAL_ID` continuam em `mask`. O limiar de confiança mede a certeza da detecção e não substitui essa análise de relacionamento. Regras explícitas `mask`, `block`, `route_local` e `disabled`, inclusive por tenant, prevalecem sobre o padrão contextual.
 
 > [!CAUTION]
 > A ação `disabled` desliga o DLP para a entidade ou macro-família selecionada: o valor não é detectado, tokenizado, contabilizado nem bloqueado e pode seguir em texto puro ao provedor. Use somente quando esse comportamento for intencional. Uma regra específica do tenant pode sobrescrever a global; `inherit` mantém a regra global. Para preservar o Zero-PII, a telemetria não persiste o prompt sanitizado enquanto a política efetiva tiver qualquer ação `disabled`.
@@ -422,7 +426,7 @@ hadesgate/
 │   ├── stream/             # Detokenizador SSE com janela deslizante
 │   ├── protocol/           # Extratores OpenAI / Responses / Anthropic
 │   ├── proxy/              # Gateway, upstreams, auth e limites
-│   ├── policy/             # Ações mask / block / route_local / disabled
+│   ├── policy/             # Ações mask / contextual / block / route_local / disabled
 │   ├── observability/      # Telemetria SQLite Zero-PII
 │   ├── config/             # Variáveis de ambiente
 │   └── web/                # API do dashboard + frontend embutido
@@ -449,7 +453,7 @@ make quality   # roda go vet, testes unitários, gate de acurácia PII e tsc
 make bench     # microbenchmarks de latência e alocações do motor
 ```
 
-O CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) valida um corpus determinístico com **130 cenários** (77 positivos, 53 controles negativos e 30 tipos de entidade). O gate exige precisão e recall `≥ 90%` tanto no agregado quanto em **cada tipo**, além de validar a estrutura mínima do corpus e o typecheck estático do painel. Testes metamórficos exercitam mudanças de contexto/formato e o detokenizador é validado em todos os pontos de fragmentação do stream.
+O CI ([`.github/workflows/ci.yml`](./.github/workflows/ci.yml)) valida um corpus determinístico com **135 cenários** (80 positivos, 55 controles negativos e 30 tipos de entidade). O gate exige precisão e recall `≥ 90%` tanto no agregado quanto em **cada tipo**, além de validar a estrutura mínima do corpus e o typecheck estático do painel. Testes metamórficos exercitam mudanças de contexto/formato e o detokenizador é validado em todos os pontos de fragmentação do stream.
 
 ---
 
@@ -481,7 +485,13 @@ Encontrou uma vulnerabilidade? **Não abra uma issue pública.** Entre em contat
 
 ## 📄 Licença
 
-**A definir.** A licença do projeto ainda será escolhida e publicada no arquivo [`LICENSE`](./LICENSE).
+Copyright © 2026 Rodolfo Bandeira e contribuidores do HadesGate.
+
+O HadesGate é software livre licenciado sob a **GNU Affero General Public License v3.0 somente** (`AGPL-3.0-only`). Consulte o texto integral em [`LICENSE`](./LICENSE).
+
+Você pode usar, estudar, modificar, executar e redistribuir o HadesGate, inclusive comercialmente. Se distribuir uma versão modificada ou disponibilizá-la para usuários por uma rede, deverá cumprir a AGPL, incluindo oferecer o código-fonte correspondente dessa versão sob a mesma licença. A AGPL permite forks e revenda; sua proteção é o *copyleft* forte, não uma proibição de concorrência ou de uso comercial.
+
+> A alteração de MIT para AGPL-3.0-only vale para as versões licenciadas desta forma e não recolhe direitos de cópias que tenham sido obtidas legitimamente sob a licença MIT anterior. Para interpretação aplicável ao seu caso, consulte assessoria jurídica.
 
 ---
 

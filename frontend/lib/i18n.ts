@@ -133,6 +133,8 @@ export interface Translations {
     mask: string;
     block: string;
     routeLocal: string;
+    contextual: string;
+    contextualDescription: string;
     disabled: string;
     disabledWarning: string;
     allFamilies: string;
@@ -140,6 +142,7 @@ export interface Translations {
     setAllMask: string;
     setAllBlock: string;
     setAllRouteLocal: string;
+    setAllContextual: string;
     setAllDisabled: string;
     familyConfidence: string;
     applyToAllInGroup: string;
@@ -172,8 +175,21 @@ export interface Translations {
     credentialRole: string;
     createCredential: string;
     oneTimeSecret: string;
+    rotateCredential: string;
+    rotateCredentialTitle: string;
+    rotateCredentialConfirm: string;
+    rotateSuccess: string;
+    rotatedSecretTitle: string;
+    rotatedSecretDesc: string;
+    onlyBootstrapCanRotate: string;
     adminOnly: string;
     retentionTitle: string;
+    retentionTenantLabel: string;
+    retentionTenantDesc: string;
+    retentionDaysLabel: string;
+    retentionDaysDesc: string;
+    retentionMaxRowsLabel: string;
+    retentionMaxRowsDesc: string;
     retentionDays: string;
     maxRows: string;
     globalOrTenant: string;
@@ -322,6 +338,8 @@ export const translations: Record<Language, Translations> = {
       mask: "MASCARAR (MASK)",
       block: "BLOQUEAR (BLOCK)",
       routeLocal: "ROTEAR LOCAL",
+      contextual: "CONTEXTUAL",
+      contextualDescription: "CONTEXTUAL protege MEDICATION e CID somente quando vinculados a uma identidade no mesmo trecho. Identificadores diretos de saúde, como SUS e prontuário, continuam mascarados.",
       disabled: "DESATIVAR DLP",
       disabledWarning: "ATENÇÃO: DESATIVAR ignora detecção, tokenização, métricas e bloqueio. Dados dessa categoria podem seguir em texto puro ao provedor.",
       allFamilies: "TODAS AS FAMÍLIAS",
@@ -329,6 +347,7 @@ export const translations: Record<Language, Translations> = {
       setAllMask: "TODOS MASK",
       setAllBlock: "TODOS BLOCK",
       setAllRouteLocal: "TODOS LOCAL",
+      setAllContextual: "SAÚDE CONTEXTUAL",
       setAllDisabled: "TODOS SEM DLP",
       familyConfidence: "CONFIANÇA MÍNIMA (PESO DO LOTE)",
       applyToAllInGroup: "APLICAR A TODAS DO GRUPO",
@@ -361,8 +380,21 @@ export const translations: Record<Language, Translations> = {
       credentialRole: "PAPEL / ESCOPO",
       createCredential: "CRIAR CREDENCIAL",
       oneTimeSecret: "SEGREDO VISÍVEL SOMENTE AGORA",
+      rotateCredential: "ROTACIONAR",
+      rotateCredentialTitle: "Rotacionar chave (invalida a atual e gera nova)",
+      rotateCredentialConfirm: "Tem certeza que deseja rotacionar esta chave? O token atual será invalidado imediatamente.",
+      rotateSuccess: "Chave rotacionada com sucesso. Copie o novo segredo agora.",
+      rotatedSecretTitle: "NOVO SEGREDO ROTACIONADO // VISÍVEL SOMENTE AGORA",
+      rotatedSecretDesc: "A chave anterior foi permanentemente invalidada. Guarde este segredo em local seguro.",
+      onlyBootstrapCanRotate: "Apenas a chave mestre HADESGATE_ADMIN_KEY pode rotacionar credenciais.",
       adminOnly: "OPERAÇÃO EXCLUSIVA DO PAPEL ADMIN",
       retentionTitle: "RETENÇÃO DE TELEMETRIA",
+      retentionTenantLabel: "ESCOPO / TENANT",
+      retentionTenantDesc: "Identificador do tenant ou '*' para aplicar como política global.",
+      retentionDaysLabel: "DIAS DE RETENÇÃO",
+      retentionDaysDesc: "Tempo máximo em dias antes de expurgar traces antigos.",
+      retentionMaxRowsLabel: "LIMITE DE REGISTROS",
+      retentionMaxRowsDesc: "Teto de linhas salvas no banco de telemetria.",
       retentionDays: "DIAS DE RETENÇÃO",
       maxRows: "MÁXIMO DE REGISTROS",
       globalOrTenant: "TENANT ID (* PARA GLOBAL)",
@@ -509,6 +541,8 @@ export const translations: Record<Language, Translations> = {
       mask: "MASK",
       block: "BLOCK",
       routeLocal: "ROUTE LOCAL",
+      contextual: "CONTEXTUAL",
+      contextualDescription: "CONTEXTUAL protects MEDICATION and CID only when linked to an identity in the same segment. Direct health identifiers, such as health cards and medical records, remain masked.",
       disabled: "DISABLE DLP",
       disabledWarning: "WARNING: DISABLE skips detection, tokenization, metrics, and blocking. Data in this category may reach the provider as plaintext.",
       allFamilies: "ALL FAMILIES",
@@ -516,6 +550,7 @@ export const translations: Record<Language, Translations> = {
       setAllMask: "ALL MASK",
       setAllBlock: "ALL BLOCK",
       setAllRouteLocal: "ALL LOCAL",
+      setAllContextual: "CONTEXTUAL HEALTH",
       setAllDisabled: "ALL NO DLP",
       familyConfidence: "MIN CONFIDENCE (BATCH WEIGHT)",
       applyToAllInGroup: "APPLY TO ALL IN GROUP",
@@ -548,8 +583,21 @@ export const translations: Record<Language, Translations> = {
       credentialRole: "ROLE / SCOPE",
       createCredential: "CREATE CREDENTIAL",
       oneTimeSecret: "SECRET VISIBLE ONLY ONCE",
+      rotateCredential: "ROTATE",
+      rotateCredentialTitle: "Rotate key (invalidates current and generates new)",
+      rotateCredentialConfirm: "Are you sure you want to rotate this key? The current token will be invalidated immediately.",
+      rotateSuccess: "Key rotated successfully. Copy the new secret now.",
+      rotatedSecretTitle: "NEW ROTATED SECRET // VISIBLE ONLY NOW",
+      rotatedSecretDesc: "The previous key has been permanently invalidated. Store this secret securely.",
+      onlyBootstrapCanRotate: "Only the master HADESGATE_ADMIN_KEY can rotate credentials.",
       adminOnly: "ADMIN ROLE REQUIRED",
       retentionTitle: "TELEMETRY RETENTION",
+      retentionTenantLabel: "SCOPE / TENANT",
+      retentionTenantDesc: "Tenant identifier or '*' to apply globally as default.",
+      retentionDaysLabel: "RETENTION DAYS",
+      retentionDaysDesc: "Maximum time in days before purging old traces.",
+      retentionMaxRowsLabel: "ROW LIMIT",
+      retentionMaxRowsDesc: "Maximum rows preserved in telemetry database.",
       retentionDays: "RETENTION DAYS",
       maxRows: "MAXIMUM ROWS",
       globalOrTenant: "TENANT ID (* FOR GLOBAL)",

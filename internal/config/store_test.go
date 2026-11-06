@@ -339,3 +339,59 @@ func TestStoreProviderCredentialsPersistOnlyFingerprint(t *testing.T) {
 		t.Fatalf("credential was not revoked: credentials=%+v err=%v", credentials, err)
 	}
 }
+
+func TestStore_ClearWebhookAndThresholdPersistence(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("opening sqlite: %v", err)
+	}
+	defer db.Close()
+
+	masterKey := []byte("01234567890123456789012345678901")
+	store, err := NewStore(db, masterKey)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Save with webhook and thresholds
+	cfg := DynamicConfig{
+		WebhookURL:       "https://hooks.example.test/incoming",
+		WebhookSecret:    "hmac-secret-123",
+		FamilyThresholds: map[string]float64{"HEALTH_PHI": 0.8},
+		EntityThresholds: map[string]float64{"CPF": 0.95},
+	}
+	if err := store.SaveDynamicConfig(ctx, cfg); err != nil {
+		t.Fatalf("SaveDynamicConfig failed: %v", err)
+	}
+
+	loaded, err := store.GetDynamicConfig(ctx)
+	if err != nil {
+		t.Fatalf("GetDynamicConfig failed: %v", err)
+	}
+	if loaded.WebhookURL != "https://hooks.example.test/incoming" {
+		t.Fatalf("expected webhook URL, got %q", loaded.WebhookURL)
+	}
+	if loaded.FamilyThresholds["HEALTH_PHI"] != 0.8 || loaded.EntityThresholds["CPF"] != 0.95 {
+		t.Fatalf("thresholds not persisted: family=%v entity=%v", loaded.FamilyThresholds, loaded.EntityThresholds)
+	}
+
+	// 2. Clear webhook using __CLEAR__
+	cfg.WebhookURL = "__CLEAR__"
+	cfg.WebhookSecret = "__CLEAR__"
+	if err := store.SaveDynamicConfig(ctx, cfg); err != nil {
+		t.Fatalf("SaveDynamicConfig with __CLEAR__ failed: %v", err)
+	}
+
+	cleared, err := store.GetDynamicConfig(ctx)
+	if err != nil {
+		t.Fatalf("GetDynamicConfig after clear failed: %v", err)
+	}
+	if cleared.WebhookURL != "" {
+		t.Fatalf("expected cleared webhook URL, got %q", cleared.WebhookURL)
+	}
+	if cleared.WebhookSecret != "" {
+		t.Fatalf("expected cleared webhook secret, got %q", cleared.WebhookSecret)
+	}
+}

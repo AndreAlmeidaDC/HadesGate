@@ -55,6 +55,49 @@ func TestAdminCredentialsAreAccountlessScopedAndOneTimeReveal(t *testing.T) {
 	}
 }
 
+func TestAdminCredentialRotationInvalidatesOldSecretAndAuthenticatesNew(t *testing.T) {
+	store := newGovernanceTestStore(t)
+	ctx := context.Background()
+
+	// 1. Create initial credential
+	created, err := store.CreateAdminCredential(ctx, "SecOps", RoleOperator)
+	if err != nil {
+		t.Fatalf("creating credential: %v", err)
+	}
+	oldSecret := created.Secret
+
+	// Verify old secret works
+	if _, ok := store.AuthenticateAdminCredential(ctx, oldSecret); !ok {
+		t.Fatal("old secret did not authenticate before rotation")
+	}
+
+	// 2. Rotate the credential
+	rotated, err := store.RotateAdminCredential(ctx, created.KeyID)
+	if err != nil {
+		t.Fatalf("rotating credential: %v", err)
+	}
+	if rotated.Secret == "" || rotated.Secret == oldSecret {
+		t.Fatalf("expected new secret generated, got %q", rotated.Secret)
+	}
+	if rotated.KeyID != created.KeyID {
+		t.Fatalf("expected same key ID %s, got %s", created.KeyID, rotated.KeyID)
+	}
+
+	// 3. Old secret MUST be invalidated
+	if _, ok := store.AuthenticateAdminCredential(ctx, oldSecret); ok {
+		t.Fatal("old secret still authenticated after rotation")
+	}
+
+	// 4. New secret MUST authenticate
+	authenticated, ok := store.AuthenticateAdminCredential(ctx, rotated.Secret)
+	if !ok {
+		t.Fatal("new secret failed to authenticate")
+	}
+	if authenticated.KeyID != created.KeyID || authenticated.Role != RoleOperator {
+		t.Fatalf("unexpected authenticated principal: %+v", authenticated)
+	}
+}
+
 func TestGovernanceAuditUsesUniqueNonceAndSignature(t *testing.T) {
 	store := newGovernanceTestStore(t)
 	ctx := context.Background()

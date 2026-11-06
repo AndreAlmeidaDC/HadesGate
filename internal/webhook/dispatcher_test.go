@@ -102,3 +102,31 @@ func TestDispatcher_EventFiltering(t *testing.T) {
 	}
 }
 
+func TestDispatcher_TestDispatchTarget_Validation(t *testing.T) {
+	d := NewDispatcher(Config{})
+	defer d.Close()
+
+	// 1. Invalid URL scheme (such as an autofilled email)
+	err := d.TestDispatchTarget("trainer@fitflow.com", "", Event{Event: "test_ping"})
+	if err == nil {
+		t.Fatal("expected error for non-http URL, got nil")
+	}
+
+	// 2. Empty URL
+	err = d.TestDispatchTarget("", "", Event{Event: "test_ping"})
+	if err == nil {
+		t.Fatal("expected error for empty URL, got nil")
+	}
+
+	// 3. Valid target
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	err = d.TestDispatchTarget(server.URL, "secret123", Event{Event: "test_ping"})
+	if err != nil {
+		t.Fatalf("expected successful dispatch, got %v", err)
+	}
+}
+

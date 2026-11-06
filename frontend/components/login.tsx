@@ -284,7 +284,17 @@ export function Login({
       {/* Bottom Industrial Stamp */}
       <div className="max-w-7xl w-full mx-auto flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         <span>||| || |||| | ||| |||| ||</span>
-        <span>REV 2.0 // {t.login.deterministicEngine}</span>
+        <div className="flex items-center gap-3">
+          <span>REV 2.0 // {t.login.deterministicEngine}</span>
+          <a
+            href="https://github.com/rodolfoportalles/HadesGate"
+            target="_blank"
+            rel="noreferrer"
+            className="font-bold text-purple-500 hover:text-purple-400 underline underline-offset-2"
+          >
+            SOURCE // AGPL-3.0
+          </a>
+        </div>
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -85,6 +86,7 @@ func main() {
 	defer traceLogger.Close()
 
 	// 4. Initialize Dynamic Configuration & Multitenancy Store (Phase 13)
+	initialTenantNames := make(map[string]string)
 	configStore, err := config.NewStore(traceLogger.DB(), configMasterKey)
 	if err != nil {
 		log.Fatalf("encrypted configuration store unavailable: %v", err)
@@ -142,6 +144,15 @@ func main() {
 			tenantActions := make(map[string]map[string]string, len(activeTenants))
 			tenantRateLimits := make(map[string]int, len(activeTenants))
 			for _, t := range activeTenants {
+				name := strings.TrimSpace(t.Name)
+				if name == "" {
+					name = t.ID
+				}
+				initialTenantNames[t.ID] = name
+				slug := strings.ToLower(strings.TrimSpace(t.Name))
+				if slug != "" {
+					initialTenantNames[slug] = name
+				}
 				tenantKeys[t.ID] = t.ProxyKey
 				tenantRateLimits[t.ID] = t.RateLimit
 				if len(t.EntityActions) > 0 {
@@ -196,6 +207,7 @@ func main() {
 		GlobalProxyKey:            cfg.ProxyKey,
 		EntityActions:             cfg.EntityActions,
 		TenantKeys:                cfg.TenantProxyKeys,
+		TenantNames:               initialTenantNames,
 		TenantEntityActions:       cfg.TenantEntityActions,
 		RateLimitPerMinute:        cfg.RateLimitPerMinute,
 		TenantRateLimits:          cfg.TenantRateLimits,

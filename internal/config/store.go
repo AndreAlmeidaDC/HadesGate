@@ -300,6 +300,14 @@ func (s *Store) GetDynamicConfig(ctx context.Context) (DynamicConfig, error) {
 			if v != "" {
 				cfg.CORSAllowedOrigins = strings.Split(v, ",")
 			}
+		case "family_thresholds":
+			if v != "" {
+				_ = json.Unmarshal([]byte(v), &cfg.FamilyThresholds)
+			}
+		case "entity_thresholds":
+			if v != "" {
+				_ = json.Unmarshal([]byte(v), &cfg.EntityThresholds)
+			}
 		}
 	}
 
@@ -321,6 +329,8 @@ func (s *Store) saveDynamicConfigLocked(ctx context.Context, cfg DynamicConfig) 
 	defer tx.Rollback()
 
 	actionsJSON, _ := json.Marshal(cfg.EntityActions)
+	familyThresholdsJSON, _ := json.Marshal(cfg.FamilyThresholds)
+	entityThresholdsJSON, _ := json.Marshal(cfg.EntityThresholds)
 	now := time.Now().UTC()
 	globalProxyKey, err := s.encryptedSystemSecret(ctx, tx, "global_proxy_key", strings.TrimSpace(cfg.GlobalProxyKey))
 	if err != nil {
@@ -345,6 +355,8 @@ func (s *Store) saveDynamicConfigLocked(ctx context.Context, cfg DynamicConfig) 
 		"enable_egress_scan":   fmt.Sprintf("%t", cfg.EnableEgressScan),
 		"ollama_base_url":      cfg.OllamaBaseURL,
 		"cors_allowed_origins": strings.Join(cfg.CORSAllowedOrigins, ","),
+		"family_thresholds":    string(familyThresholdsJSON),
+		"entity_thresholds":    string(entityThresholdsJSON),
 	}
 
 	stmt, err := tx.PrepareContext(ctx, `
@@ -367,6 +379,9 @@ func (s *Store) saveDynamicConfigLocked(ctx context.Context, cfg DynamicConfig) 
 }
 
 func (s *Store) encryptedSystemSecret(ctx context.Context, tx *sql.Tx, key, plaintext string) (string, error) {
+	if plaintext == "__CLEAR__" {
+		return "", nil
+	}
 	if plaintext != "" {
 		return s.secrets.encrypt(plaintext, systemSecretAAD(key))
 	}

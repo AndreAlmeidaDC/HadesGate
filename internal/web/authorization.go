@@ -11,6 +11,7 @@ import (
 
 type adminPrincipal struct {
 	KeyID string
+	Label string
 	Role  config.AdminRole
 }
 
@@ -22,12 +23,16 @@ func (s *Server) authenticateAdmin(r *http.Request) (adminPrincipal, bool) {
 		return adminPrincipal{}, false
 	}
 	if s.adminKey != "" && len(key) == len(s.adminKey) && subtle.ConstantTimeCompare([]byte(key), []byte(s.adminKey)) == 1 {
-		return adminPrincipal{KeyID: "bootstrap", Role: config.RoleAdmin}, true
+		return adminPrincipal{KeyID: "bootstrap", Label: "BOOTSTRAP", Role: config.RoleAdmin}, true
 	}
 	if s.store != nil {
 		credential, ok := s.store.AuthenticateAdminCredential(r.Context(), key)
 		if ok {
-			return adminPrincipal{KeyID: credential.KeyID, Role: credential.Role}, true
+			label := credential.Label
+			if label == "" {
+				label = credential.KeyID
+			}
+			return adminPrincipal{KeyID: credential.KeyID, Label: label, Role: credential.Role}, true
 		}
 	}
 	return adminPrincipal{}, false
