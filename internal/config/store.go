@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -51,6 +52,7 @@ type Store struct {
 	db      *sql.DB
 	mu      sync.Mutex
 	secrets *secretCipher
+	authKey [32]byte
 }
 
 // NewStore initializes the store and creates necessary SQLite tables.
@@ -62,8 +64,11 @@ func NewStore(db *sql.DB, masterKey []byte) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{db: db, secrets: secrets}
+	s := &Store{db: db, secrets: secrets, authKey: sha256.Sum256(append(append([]byte{}, masterKey...), []byte("/hadesgate/governance/v1")...))}
 	if err := s.initSchema(context.Background()); err != nil {
+		return nil, err
+	}
+	if err := s.initGovernanceSchema(context.Background()); err != nil {
 		return nil, err
 	}
 	if err := s.migrateAndValidateSecrets(context.Background()); err != nil {

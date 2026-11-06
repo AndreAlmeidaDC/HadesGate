@@ -34,6 +34,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
   - Nova ação DLP `disabled`, configurável globalmente, por macro-família, entidade e tenant, com override/herança no Console e alerta explícito de passagem em texto puro.
   - Entidades desativadas deixam de participar da detecção, tokenização, vault, métricas e decisões `block`/`route_local`, preservando as demais proteções na mesma requisição.
   - A telemetria omite o conteúdo do prompt quando a política efetiva contém `disabled`, impedindo persistência acidental de plaintext no SQLite.
+- **Fase 19 — Governança, Retenção & Auditoria Enterprise**:
+  - RBAC sem usuários com credenciais administrativas `viewer`, `operator` e `admin`, fingerprints HMAC-SHA256, comparação em tempo constante, revogação individual e segredo revelado uma única vez.
+  - Retenção temporal e quotas de linhas globais/por tenant aplicadas no momento da gravação sem afetar a telemetria de outros tenants.
+  - Trilha Zero-PII persistente para mudanças de políticas e credenciais, identificada por `actor_key_id`, papel e timestamp, com nonce antirreplay e assinatura HMAC-SHA256 exportável para SIEM.
+  - Backup e restauração AES-256-GCM das configurações já cifradas/fingerprints, excluindo traces, vault, prompts e plaintexts.
+  - Nova aba de Governança no Console para credenciais administrativas, retenção, auditoria assinada e recuperação criptografada, com interface completa em pt-BR/en.
 - **Corpus de acurácia e gate por categoria**:
   - Corpus ampliado de 41 para 130 cenários, incluindo 77 casos positivos, 53 controles negativos, textos multilíngues, múltiplas entidades, formatos compactos e colisões adversariais em 30 tipos.
   - `pii-benchmark` agora valida integridade e cobertura mínima do corpus, apresenta falhas detalhadas e métricas por tipo, e exige precisão/recall ≥ 90% em cada categoria além do agregado.

@@ -332,6 +332,8 @@ O dashboard embutido mostra, de forma objetiva, **o que foi protegido**:
 > [!IMPORTANT]
 > O SQLite (`modernc.org/sqlite`, Go puro) armazena **apenas** métricas, categorias de entidades e o prompt **já sanitizado**. Valores originais e o mapa de tokens **nunca** tocam o disco.
 
+A retenção pode ser configurada globalmente ou por tenant por quantidade de dias e máximo de registros. A política específica do tenant prevalece sobre `*`, permitindo expiração e quotas sem misturar dados entre departamentos.
+
 ---
 
 ## ⚙️ Configuração
@@ -384,11 +386,25 @@ Upstreams dinâmicos passam por resolução DNS/IP em cada nova conexão e o soc
 | Credencial | Escopo permitido |
 |---|---|
 | `HADESGATE_ADMIN_KEY` | Login do Console, Playground, traces, vault e APIs administrativas `/api/*` |
+| Credencial administrativa `viewer` | Consulta configurações públicas, retenção, traces sanitizados e auditoria assinada |
+| Credencial administrativa `operator` | Tudo de `viewer`, mais políticas, tenants, retenção, credenciais BYOK e operações do gateway |
+| Credencial administrativa `admin` | Tudo de `operator`, mais criação/revogação de credenciais administrativas e backup/restauração |
 | `HADESGATE_PROXY_KEY` | Requisições aos endpoints de IA; não autentica o Console |
 | Chave de proxy do tenant | Requisições de IA identificadas pelo tenant; não autentica o Console |
 | Chave BYOK do provedor | Proxy transparente após cadastro do fingerprint; não autentica o Console |
 
-O endpoint `/api/auth/verify` valida exclusivamente a chave administrativa. Sessões salvas no navegador são revalidadas no servidor a cada carregamento; um valor manipulado no `sessionStorage` não concede acesso às APIs.
+O endpoint `/api/auth/verify` valida exclusivamente credenciais administrativas e informa `key_id`/papel. Não existem contas de usuário: chaves rotacionáveis são armazenadas somente como fingerprint HMAC e o segredo é exibido uma única vez. `HADESGATE_ADMIN_KEY` permanece como credencial `admin` de bootstrap/recuperação. Sessões salvas no navegador são revalidadas no servidor a cada carregamento; um valor manipulado no `sessionStorage` não concede acesso às APIs.
+
+### Governança e recuperação
+
+| Endpoint | Papel mínimo | Finalidade |
+|---|---|---|
+| `/api/admin-credentials` | `admin` | Criar, listar e revogar chaves administrativas sem usuários |
+| `/api/retention` | `viewer` leitura / `operator` escrita | Retenção temporal e quota de registros global/tenant |
+| `/api/audit/events` | `viewer` | Exportar eventos Zero-PII com nonce único e assinatura HMAC-SHA256 |
+| `/api/config-backup` | `admin` | Exportar/restaurar envelope AES-256-GCM sem vault, traces ou plaintext |
+
+Alterações de políticas, tenants, credenciais, retenção, telemetria e backups registram somente metadados operacionais, `actor_key_id`, papel e timestamp. O arquivo de backup depende da mesma `HADESGATE_CONFIG_MASTER_KEY`; guarde ambos separadamente.
 
 ---
 

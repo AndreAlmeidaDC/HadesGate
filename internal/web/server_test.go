@@ -99,6 +99,87 @@ func TestServer_AuthVerify(t *testing.T) {
 	}
 }
 
+func TestServer_AccountlessAdministrativeRoleMatrix(t *testing.T) {
+	const bootstrapKey = "bootstrap-admin-key"
+	server, mux := setupTestServer(bootstrapKey)
+	viewer, err := server.store.CreateAdminCredential(context.Background(), "Read only", config.RoleViewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator, err := server.store.CreateAdminCredential(context.Background(), "Operations", config.RoleOperator)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := func(method, path, key, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		return response
+	}
+
+	if response := request(http.MethodGet, "/api/traces", viewer.Secret, ""); response.Code != http.StatusOK {
+		t.Fatalf("viewer could not read traces: %d %s", response.Code, response.Body.String())
+	}
+	if response := request(http.MethodDelete, "/api/traces", viewer.Secret, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("viewer mutated traces: %d", response.Code)
+	}
+	if response := request(http.MethodDelete, "/api/traces", operator.Secret, ""); response.Code != http.StatusOK {
+		t.Fatalf("operator could not clear traces: %d %s", response.Code, response.Body.String())
+	}
+	if response := request(http.MethodGet, "/api/admin-credentials", operator.Secret, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("operator listed admin credentials: %d", response.Code)
+	}
+	if response := request(http.MethodGet, "/api/admin-credentials", bootstrapKey, ""); response.Code != http.StatusOK {
+		t.Fatalf("bootstrap admin could not list credentials: %d", response.Code)
+	}
+
+	verify := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"key":"`+viewer.Secret+`"}`))
+	verifyResponse := httptest.NewRecorder()
+	mux.ServeHTTP(verifyResponse, verify)
+	var auth AuthVerifyResponse
+	if err := json.NewDecoder(verifyResponse.Body).Decode(&auth); err != nil {
+		t.Fatal(err)
+	}
+	if !auth.Valid || auth.Role != config.RoleViewer || auth.KeyID != viewer.KeyID {
+		t.Fatalf("role was not returned during authentication: %+v", auth)
+	}
+}
+
+func TestServer_GovernanceEndpointsCreateSignedAuditAndEncryptedBackup(t *testing.T) {
+	const bootstrapKey = "bootstrap-admin-key"
+	_, mux := setupTestServer(bootstrapKey)
+	authorized := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+bootstrapKey)
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, req)
+		return response
+	}
+	created := authorized(http.MethodPost, "/api/admin-credentials", `{"label":"Auditoria","role":"viewer"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("credential creation failed: %d %s", created.Code, created.Body.String())
+	}
+	var credential config.AdminCredential
+	if err := json.NewDecoder(created.Body).Decode(&credential); err != nil || credential.Secret == "" {
+		t.Fatalf("one-time secret missing: %+v %v", credential, err)
+	}
+	audit := authorized(http.MethodGet, "/api/audit/events", "")
+	var exported struct {
+		Events []config.AuditEvent `json:"events"`
+	}
+	if err := json.NewDecoder(audit.Body).Decode(&exported); err != nil || len(exported.Events) == 0 || exported.Events[0].Signature == "" || exported.Events[0].Nonce == "" {
+		t.Fatalf("signed audit export invalid: %s", audit.Body.String())
+	}
+	backup := authorized(http.MethodGet, "/api/config-backup", "")
+	if backup.Code != http.StatusOK || strings.Contains(backup.Body.String(), credential.Secret) {
+		t.Fatalf("encrypted backup invalid or leaked secret: %d %s", backup.Code, backup.Body.String())
+	}
+}
+
 func TestServer_ProtectedEndpoints(t *testing.T) {
 	const secretKey = "test_secret_key_123"
 	_, mux := setupTestServer(secretKey)
@@ -831,5 +912,94 @@ func TestServer_ConfigUpdateHotReloadsCORS(t *testing.T) {
 	handler.ServeHTTP(preflightW, preflight)
 	if preflightW.Code != http.StatusNoContent || preflightW.Header().Get("Access-Control-Allow-Origin") != "https://new.example" {
 		t.Fatalf("CORS update was not applied without restart: status=%d headers=%v", preflightW.Code, preflightW.Header())
+	}
+}
+
+func TestServer_PlaygroundProxy(t *testing.T) {
+	const adminKey = "admin-secret-key"
+	const proxyKey = "proxy-secret-key"
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("unexpected upstream path: %s", r.URL.Path)
+		}
+		if r.Header.Get("X-API-Key") != "anthropic-key" {
+			t.Fatalf("Anthropic key missing or incorrect: %s", r.Header.Get("X-API-Key"))
+		}
+		var request map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		messages := request["messages"].([]interface{})
+		first := messages[0].(map[string]interface{})["content"].(string)
+		if strings.Contains(first, "529.982.247-25") {
+			t.Fatalf("raw CPF leaked upstream: %s", first)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id": "msg_test", "type": "message", "role": "assistant",
+			"content": []interface{}{map[string]interface{}{"type": "text", "text": "Recebido: " + first}},
+		})
+	}))
+	defer upstreamServer.Close()
+
+	v := vault.NewMemoryVault(5 * time.Minute)
+	eng := anonymizer.NewEngine(anonymizer.DefaultConfig(), v)
+	traces := observability.NewTraceLogger(100)
+	wh := webhook.NewDispatcher(webhook.Config{})
+	upstream := proxy.NewUpstreamDispatcher(proxy.UpstreamConfig{
+		AnthropicURL: upstreamServer.URL,
+		AnthropicKey: "anthropic-key",
+	})
+	gw := proxy.NewGatewayWithOptions(eng, upstream, traces, proxy.GatewayOptions{
+		GlobalProxyKey: proxyKey,
+		Webhook:        wh,
+	})
+	srv := NewServer(eng, gw, adminKey, nil)
+	store, _ := config.NewStore(traces.DB(), []byte("0123456789abcdef0123456789abcdef"))
+	srv.SetStore(store)
+	srv.SetWebhook(wh)
+	srv.SetUpstream(upstream)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/messages", gw.HandleAnthropicMessages)
+	mux.HandleFunc("/v1/chat/completions", gw.HandleChatCompletions)
+	srv.RegisterRoutes(mux)
+
+	// 1. Calling public /v1/messages with AdminKey must be rejected with 401
+	pubReq := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-test","messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`))
+	pubReq.Header.Set("Authorization", "Bearer "+adminKey)
+	pubW := httptest.NewRecorder()
+	mux.ServeHTTP(pubW, pubReq)
+	if pubW.Code != http.StatusUnauthorized {
+		t.Fatalf("public /v1/messages accepted admin key: got %d, want 401", pubW.Code)
+	}
+
+	// 2. Calling /api/playground/v1/messages without auth must be rejected with 401
+	unauthReq := httptest.NewRequest(http.MethodPost, "/api/playground/v1/messages", strings.NewReader(`{"model":"claude-test","messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`))
+	unauthW := httptest.NewRecorder()
+	mux.ServeHTTP(unauthW, unauthReq)
+	if unauthW.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated /api/playground/v1/messages got %d, want 401", unauthW.Code)
+	}
+
+	// 3. Calling /api/playground/v1/messages with AdminKey must succeed and mask/detokenize
+	authReq := httptest.NewRequest(http.MethodPost, "/api/playground/v1/messages", strings.NewReader(`{"model":"claude-test","messages":[{"role":"user","content":"CPF 529.982.247-25"}]}`))
+	authReq.Header.Set("Authorization", "Bearer "+adminKey)
+	authW := httptest.NewRecorder()
+	mux.ServeHTTP(authW, authReq)
+	if authW.Code != http.StatusOK {
+		t.Fatalf("/api/playground/v1/messages with admin session failed: got %d: %s", authW.Code, authW.Body.String())
+	}
+	if !strings.Contains(authW.Body.String(), "529.982.247-25") {
+		t.Fatalf("detokenized response did not restore CPF: %s", authW.Body.String())
+	}
+
+	// 4. Calling /api/playground/v1/chat/completions with mock model must succeed
+	mockReq := httptest.NewRequest(http.MethodPost, "/api/playground/v1/chat/completions", strings.NewReader(`{"model":"mock","messages":[{"role":"user","content":"hello"}]}`))
+	mockReq.Header.Set("Authorization", "Bearer "+adminKey)
+	mockW := httptest.NewRecorder()
+	mux.ServeHTTP(mockW, mockReq)
+	if mockW.Code != http.StatusOK {
+		t.Fatalf("/api/playground/v1/chat/completions mock failed: got %d: %s", mockW.Code, mockW.Body.String())
 	}
 }

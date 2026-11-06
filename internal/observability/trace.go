@@ -163,6 +163,12 @@ CREATE TABLE IF NOT EXISTS audit_traces (
 	sanitized_prompt TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_traces_timestamp ON audit_traces(timestamp_unix DESC);
+CREATE TABLE IF NOT EXISTS telemetry_retention (
+	tenant_id TEXT PRIMARY KEY,
+	retention_days INTEGER NOT NULL DEFAULT 0,
+	max_rows INTEGER NOT NULL DEFAULT 0,
+	updated_at TIMESTAMP NOT NULL
+);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("creating audit_traces schema: %w", err)
@@ -280,6 +286,9 @@ WHERE seq <= (
 		if _, err := l.db.ExecContext(ctx, pruneQuery, l.maxRows); err != nil {
 			return fmt.Errorf("pruning old audit traces: %w", err)
 		}
+	}
+	if err := l.applyRetention(ctx, t.Tenant); err != nil {
+		return fmt.Errorf("applying telemetry retention: %w", err)
 	}
 
 	return nil

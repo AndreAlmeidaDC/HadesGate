@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -91,31 +90,6 @@ func requestAPIKey(r *http.Request) string {
 	return ""
 }
 
-// requireAdminAuth enforces that only the master administrator key can access administrative settings.
-func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key := requestAPIKey(r)
-		isAdmin := key != "" && s.adminKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(s.adminKey)) == 1
-		if !isAdmin {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": map[string]string{
-					"message": "Unauthorized: Admin privileges required",
-					"type":    "auth_error",
-				},
-			})
-			return
-		}
-		next(w, r)
-	}
-}
-
-func (s *Server) isAdminRequest(r *http.Request) bool {
-	key := requestAPIKey(r)
-	return key != "" && s.adminKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(s.adminKey)) == 1
-}
-
 // RegisterRoutes registers dashboard and management API endpoints on the given multiplexer.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Public / Status & Metrics endpoints
@@ -125,15 +99,20 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/metrics", s.handleMetrics)
 
 	// Protected management API endpoints (enforces API key)
-	mux.HandleFunc("/api/test-anonymize", s.requireAdminAuth(s.handleTestAnonymize))
-	mux.HandleFunc("/api/vault", s.requireAdminAuth(s.handleVault))
-	mux.HandleFunc("/api/traces", s.requireAdminAuth(s.handleTraces))
-	mux.HandleFunc("/api/config", s.requireAdminAuth(s.handleConfig))
-	mux.HandleFunc("/api/tenants", s.requireAdminAuth(s.handleTenants))
-	mux.HandleFunc("/api/provider-credentials", s.requireAdminAuth(s.handleProviderCredentials))
-	mux.HandleFunc("/api/webhooks/test", s.requireAdminAuth(s.handleWebhookTest))
-	mux.HandleFunc("/api/anvisa/status", s.requireAdminAuth(s.handleAnvisaStatus))
-	mux.HandleFunc("/api/anvisa/sync", s.requireAdminAuth(s.handleAnvisaSync))
+	mux.HandleFunc("/api/test-anonymize", s.requireRole(config.RoleOperator, s.handleTestAnonymize))
+	mux.HandleFunc("/api/playground/", s.requireRole(config.RoleOperator, s.handlePlaygroundProxy))
+	mux.HandleFunc("/api/vault", s.requireRole(config.RoleViewer, s.handleVault))
+	mux.HandleFunc("/api/traces", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleTraces))
+	mux.HandleFunc("/api/config", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleConfig))
+	mux.HandleFunc("/api/tenants", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleTenants))
+	mux.HandleFunc("/api/provider-credentials", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleProviderCredentials))
+	mux.HandleFunc("/api/webhooks/test", s.requireRole(config.RoleOperator, s.handleWebhookTest))
+	mux.HandleFunc("/api/anvisa/status", s.requireRole(config.RoleViewer, s.handleAnvisaStatus))
+	mux.HandleFunc("/api/anvisa/sync", s.requireRole(config.RoleOperator, s.handleAnvisaSync))
+	mux.HandleFunc("/api/admin-credentials", s.requireRole(config.RoleAdmin, s.handleAdminCredentials))
+	mux.HandleFunc("/api/retention", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleRetention))
+	mux.HandleFunc("/api/audit/events", s.requireRole(config.RoleViewer, s.handleAuditEvents))
+	mux.HandleFunc("/api/config-backup", s.requireRole(config.RoleAdmin, s.handleConfigBackup))
 
 	// Static frontend assets handler
 	if s.fs != nil {
@@ -415,6 +394,22 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+func (s *Server) handlePlaygroundProxy(w http.ResponseWriter, r *http.Request) {
+	if s.gateway == nil {
+		http.Error(w, `{"error":{"message":"Gateway not initialized","type":"server_error"}}`, http.StatusServiceUnavailable)
+		return
+	}
+	subPath := strings.TrimPrefix(r.URL.Path, "/api/playground")
+	if !strings.HasPrefix(subPath, "/") {
+		subPath = "/" + subPath
+	}
+	tenant := strings.TrimSpace(r.Header.Get("X-HadesGate-Tenant"))
+	if tenant == "" {
+		tenant = "default"
+	}
+	s.gateway.DispatchPreAuthenticated(w, r, tenant, subPath)
+}
+
 func telemetryPrompt(tenantPolicy *policy.Engine, sanitizedPrompt string) string {
 	if tenantPolicy != nil && tenantPolicy.HasDisabledActions() {
 		return ""
@@ -443,6 +438,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		s.auditChange(r, "telemetry.cleared", "tenant", requestedTenant, nil)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Traces cleared successfully"})
 		return
 	}
@@ -501,8 +497,10 @@ type AuthVerifyRequest struct {
 }
 
 type AuthVerifyResponse struct {
-	Valid   bool `json:"valid"`
-	DevMode bool `json:"dev_mode"`
+	Valid   bool             `json:"valid"`
+	DevMode bool             `json:"dev_mode"`
+	KeyID   string           `json:"key_id,omitempty"`
+	Role    config.AdminRole `json:"role,omitempty"`
 }
 
 func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
@@ -532,10 +530,14 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isValid := s.adminKey != "" && subtle.ConstantTimeCompare([]byte(reqKey), []byte(s.adminKey)) == 1
+	verifyRequest := r.Clone(r.Context())
+	verifyRequest.Header.Set("Authorization", "Bearer "+reqKey)
+	principal, isValid := s.authenticateAdmin(verifyRequest)
 	json.NewEncoder(w).Encode(AuthVerifyResponse{
 		Valid:   isValid,
 		DevMode: false,
+		KeyID:   principal.KeyID,
+		Role:    principal.Role,
 	})
 }
 
@@ -657,6 +659,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":{"message":"Configuration saved but could not be reloaded"}}`, http.StatusInternalServerError)
 			return
 		}
+		s.auditChange(r, "configuration.updated", "configuration", "global", map[string]interface{}{"entity_action_count": len(effectiveCfg.EntityActions), "egress_scan": effectiveCfg.EnableEgressScan})
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
 			"config": publicDynamicConfig(effectiveCfg, effectiveCfg.GlobalProxyKey != ""),
@@ -773,6 +776,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":{"message":"Tenant saved but runtime reload failed"}}`, http.StatusInternalServerError)
 			return
 		}
+		s.auditChange(r, "tenant.created", "tenant", savedTenant.ID, map[string]interface{}{"rate_limit": savedTenant.RateLimit, "policy_count": len(savedTenant.EntityActions)})
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
 			"tenant": publicTenant(savedTenant),
@@ -812,6 +816,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		s.auditChange(r, "tenant.updated", "tenant", payload.ID, map[string]interface{}{"original_id": origID, "rate_limit": payload.RateLimit, "policy_count": len(payload.EntityActions)})
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok":     true,
 			"tenant": publicTenant(updated),
@@ -833,6 +838,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":{"message":"Tenant deleted but runtime reload failed"}}`, http.StatusInternalServerError)
 			return
 		}
+		s.auditChange(r, "tenant.deleted", "tenant", id, nil)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"ok": true,
 		})
@@ -914,6 +920,7 @@ func (s *Server) handleProviderCredentials(w http.ResponseWriter, r *http.Reques
 			http.Error(w, `{"error":{"message":"Credential saved but reload failed"}}`, http.StatusInternalServerError)
 			return
 		}
+		s.auditChange(r, "provider_credential.created", "provider_credential", credential.ID, map[string]interface{}{"tenant_id": credential.TenantID, "provider": credential.Provider})
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "credential": credential})
 
@@ -931,6 +938,7 @@ func (s *Server) handleProviderCredentials(w http.ResponseWriter, r *http.Reques
 			http.Error(w, `{"error":{"message":"Credential revoked but reload failed"}}`, http.StatusInternalServerError)
 			return
 		}
+		s.auditChange(r, "provider_credential.revoked", "provider_credential", id, nil)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 
 	default:

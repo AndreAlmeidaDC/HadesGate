@@ -17,10 +17,12 @@ import {
   X,
   Key,
   Copy,
+  LockKeyhole,
 } from "lucide-react";
 import type { Language } from "@/lib/i18n";
 import { translations } from "@/lib/i18n";
 import { SystemToast, type SystemNotification } from "@/components/ui/system-toast";
+import { Governance } from "@/components/governance";
 
 interface SettingsProps {
   gatewayUrl: string;
@@ -152,7 +154,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
   const t = translations[lang];
 
   const [activeSubTab, setActiveSubTab] = useState<
-    "policies" | "tenants" | "webhooks" | "proxy"
+    "policies" | "tenants" | "webhooks" | "proxy" | "governance"
   >("policies");
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -809,6 +811,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
           { id: "tenants", label: t.settings.tabTenants, icon: Users },
           { id: "webhooks", label: t.settings.tabWebhooks, icon: Bell },
           { id: "proxy", label: t.settings.tabProxy, icon: Cpu },
+          { id: "governance", label: t.settings.tabGovernance, icon: LockKeyhole },
         ].map((tab) => {
           const Icon = tab.icon;
           const active = activeSubTab === tab.id;
@@ -1343,7 +1346,7 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
                               <button
                                 onClick={() =>
                                   handleCopyText(
-                                    `${gatewayUrl}/v1`,
+                                    `${gatewayUrl}/t/${ten.id}/v1`,
                                     `URL do Tenant ${ten.name || ten.id}`
                                   )
                                 }
@@ -1493,14 +1496,14 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             <form onSubmit={handleSaveEditTenant} className="p-6 overflow-y-auto space-y-6 flex-1">
               <div className="border border-border bg-secondary/40 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div className="font-mono text-[11px] text-purple-400 break-all select-all">
-                  <span className="text-muted-foreground mr-1.5 uppercase">[URL TRANSPARENTE]:</span>
-                  {`${gatewayUrl}/v1`}
+                  <span className="text-muted-foreground mr-1.5 uppercase">[URL DO TENANT]:</span>
+                  {`${gatewayUrl}/t/${editingTenant.id}/v1`}
                 </div>
                 <button
                   type="button"
                   onClick={() =>
                     handleCopyText(
-                      `${gatewayUrl}/v1`,
+                      `${gatewayUrl}/t/${editingTenant.id}/v1`,
                       `URL do Tenant ${editTenantName || editingTenant.id}`
                     )
                   }
@@ -1960,6 +1963,10 @@ export function Settings({ gatewayUrl, apiKey, lang, onNotify }: SettingsProps) 
             />
           </div>
         </div>
+      )}
+
+      {activeSubTab === "governance" && (
+        <Governance gatewayUrl={gatewayUrl} apiKey={apiKey} lang={lang} onNotify={onNotify} />
       )}
 
       {/* Floating System Notification Toast (Fallback if not handled globally) */}

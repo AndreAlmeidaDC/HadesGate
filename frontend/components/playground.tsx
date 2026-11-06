@@ -122,10 +122,10 @@ export function Playground({
       const isAnthropicModel = model.startsWith("claude-");
       const isGeminiModel = model.startsWith("gemini-");
       const targetEndpoint = isAnthropicModel
-        ? `${gatewayUrl}/v1/messages`
+        ? `${gatewayUrl}/api/playground/v1/messages`
         : isGeminiModel
-          ? `${gatewayUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse`
-          : `${gatewayUrl}/v1/chat/completions`;
+          ? `${gatewayUrl}/api/playground/v1beta/models/${model}:streamGenerateContent?alt=sse`
+          : `${gatewayUrl}/api/playground/v1/chat/completions`;
 
       const reqBody = isAnthropicModel
         ? {

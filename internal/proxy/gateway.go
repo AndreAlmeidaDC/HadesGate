@@ -500,6 +500,19 @@ func (g *Gateway) HandleGlobalProxyPath(w http.ResponseWriter, r *http.Request) 
 	g.dispatchSubPath(w, r2, subPath)
 }
 
+// DispatchPreAuthenticated routes an internally-authorized request (e.g. from the dashboard Playground)
+// directly to the appropriate protocol handler with a pre-authenticated context.
+func (g *Gateway) DispatchPreAuthenticated(w http.ResponseWriter, r *http.Request, tenant, subPath string) {
+	if tenant == "" {
+		tenant = "default"
+	}
+	ctx := context.WithValue(r.Context(), tenantCtxKey{}, tenant)
+	ctx = context.WithValue(ctx, preAuthCtxKey{}, true)
+	r2 := r.Clone(ctx)
+	r2.URL.Path = subPath
+	g.dispatchSubPath(w, r2, subPath)
+}
+
 func (g *Gateway) dispatchSubPath(w http.ResponseWriter, r *http.Request, subPath string) {
 	if strings.HasPrefix(subPath, "/v1/chat/completions") || strings.HasPrefix(subPath, "/chat/completions") {
 		g.HandleChatCompletions(w, r)

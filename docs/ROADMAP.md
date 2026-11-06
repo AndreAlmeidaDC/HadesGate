@@ -133,11 +133,11 @@ The semantic layer is an opt-in sidecar and is never required by the gateway.
 
 ### Phase 19 — Governança, Retenção & Auditoria Enterprise
 
-- [ ] Configurar retenção de telemetria por tenant, expiração temporal e quotas de armazenamento.
-- [ ] Adicionar papéis administrativos mínimos (`viewer`, `operator`, `admin`) sem reutilizar credenciais de proxy.
-- [ ] Exportar auditoria assinada e Zero-PII para SIEM, com proteção contra replay e fila persistente opcional.
-- [ ] Registrar trilha de alterações de políticas e credenciais somente com metadados, autor e timestamp.
-- [ ] Disponibilizar backup e restauração criptografados das configurações, excluindo vault e plaintexts.
+- [x] Configurar retenção de telemetria por tenant, expiração temporal e quotas de armazenamento.
+- [x] Adicionar credenciais administrativas accountless com papéis mínimos (`viewer`, `operator`, `admin`) sem reutilizar credenciais de proxy.
+- [x] Exportar auditoria assinada e Zero-PII para SIEM, com nonce antirreplay e persistência SQLite.
+- [x] Registrar trilha de alterações de políticas e credenciais somente com metadados, `actor_key_id`, papel e timestamp.
+- [x] Disponibilizar backup e restauração AES-256-GCM das configurações, excluindo vault, traces e plaintexts.
 
 ### Phase 20 — Resiliência, Compatibilidade & Operação
 

@@ -97,6 +97,7 @@ export interface Translations {
     tabTenants: string;
     tabWebhooks: string;
     tabProxy: string;
+    tabGovernance: string;
     saveChanges: string;
     saving: string;
     savedSuccess: string;
@@ -165,6 +166,25 @@ export interface Translations {
     secretUnchanged: string;
     newSecretPlaceholder: string;
     keyCopiedOnce: string;
+    governanceTitle: string;
+    governanceDesc: string;
+    adminCredentials: string;
+    credentialRole: string;
+    createCredential: string;
+    oneTimeSecret: string;
+    adminOnly: string;
+    retentionTitle: string;
+    retentionDays: string;
+    maxRows: string;
+    globalOrTenant: string;
+    saveRetention: string;
+    auditTrail: string;
+    downloadAudit: string;
+    backupTitle: string;
+    exportBackup: string;
+    restoreBackup: string;
+    backupPayload: string;
+    noGovernanceData: string;
   };
 }
 
@@ -266,6 +286,7 @@ export const translations: Record<Language, Translations> = {
       tabTenants: "02 // MULTITENANCY & QUOTAS",
       tabWebhooks: "03 // WEBHOOKS & AUDITORIA",
       tabProxy: "04 // PROXY & AGENTES",
+      tabGovernance: "05 // GOVERNANÇA & AUDITORIA",
       saveChanges: "SALVAR ALTERAÇÕES",
       saving: "SALVANDO...",
       savedSuccess: "CONFIGURAÇÕES ATUALIZADAS COM SUCESSO!",
@@ -334,6 +355,25 @@ export const translations: Record<Language, Translations> = {
       secretUnchanged: "CONFIGURADO — DEIXE VAZIO PARA MANTER",
       newSecretPlaceholder: "INFORME UM NOVO SEGREDO",
       keyCopiedOnce: "NOVA CHAVE COPIADA — VISÍVEL SOMENTE AGORA",
+      governanceTitle: "GOVERNANÇA ADMINISTRATIVA SEM USUÁRIOS",
+      governanceDesc: "Credenciais operacionais com escopos mínimos, retenção por tenant, auditoria assinada e backup cifrado Zero-PII.",
+      adminCredentials: "CREDENCIAIS ADMINISTRATIVAS",
+      credentialRole: "PAPEL / ESCOPO",
+      createCredential: "CRIAR CREDENCIAL",
+      oneTimeSecret: "SEGREDO VISÍVEL SOMENTE AGORA",
+      adminOnly: "OPERAÇÃO EXCLUSIVA DO PAPEL ADMIN",
+      retentionTitle: "RETENÇÃO DE TELEMETRIA",
+      retentionDays: "DIAS DE RETENÇÃO",
+      maxRows: "MÁXIMO DE REGISTROS",
+      globalOrTenant: "TENANT ID (* PARA GLOBAL)",
+      saveRetention: "SALVAR RETENÇÃO",
+      auditTrail: "TRILHA DE AUDITORIA ASSINADA",
+      downloadAudit: "EXPORTAR AUDITORIA",
+      backupTitle: "BACKUP CIFRADO DE CONFIGURAÇÕES",
+      exportBackup: "EXPORTAR BACKUP",
+      restoreBackup: "RESTAURAR BACKUP",
+      backupPayload: "COLE O ENVELOPE DE BACKUP ENC:V1",
+      noGovernanceData: "NENHUM REGISTRO DISPONÍVEL PARA ESTE ESCOPO",
     },
   },
   en: {
@@ -433,6 +473,7 @@ export const translations: Record<Language, Translations> = {
       tabTenants: "02 // MULTITENANCY & QUOTAS",
       tabWebhooks: "03 // WEBHOOKS & AUDIT",
       tabProxy: "04 // PROXY & AGENTS",
+      tabGovernance: "05 // GOVERNANCE & AUDIT",
       saveChanges: "SAVE CHANGES",
       saving: "SAVING...",
       savedSuccess: "CONFIGURATION UPDATED SUCCESSFULLY!",
@@ -501,6 +542,25 @@ export const translations: Record<Language, Translations> = {
       secretUnchanged: "CONFIGURED — LEAVE BLANK TO KEEP",
       newSecretPlaceholder: "ENTER A NEW SECRET",
       keyCopiedOnce: "NEW KEY COPIED — VISIBLE ONLY NOW",
+      governanceTitle: "ACCOUNTLESS ADMINISTRATIVE GOVERNANCE",
+      governanceDesc: "Least-privilege operational credentials, tenant retention, signed audit, and encrypted Zero-PII configuration backup.",
+      adminCredentials: "ADMINISTRATIVE CREDENTIALS",
+      credentialRole: "ROLE / SCOPE",
+      createCredential: "CREATE CREDENTIAL",
+      oneTimeSecret: "SECRET VISIBLE ONLY ONCE",
+      adminOnly: "ADMIN ROLE REQUIRED",
+      retentionTitle: "TELEMETRY RETENTION",
+      retentionDays: "RETENTION DAYS",
+      maxRows: "MAXIMUM ROWS",
+      globalOrTenant: "TENANT ID (* FOR GLOBAL)",
+      saveRetention: "SAVE RETENTION",
+      auditTrail: "SIGNED AUDIT TRAIL",
+      downloadAudit: "EXPORT AUDIT",
+      backupTitle: "ENCRYPTED CONFIGURATION BACKUP",
+      exportBackup: "EXPORT BACKUP",
+      restoreBackup: "RESTORE BACKUP",
+      backupPayload: "PASTE THE ENC:V1 BACKUP ENVELOPE",
+      noGovernanceData: "NO RECORDS AVAILABLE FOR THIS SCOPE",
     },
   },
 };
