@@ -1,0 +1,141 @@
+{
+  "schema": "laya-state-questions-expected",
+  "synthetic": true,
+  "rows": 281,
+  "categories": 33,
+  "counts": {
+    "API_KEY": {
+      "positive": 19,
+      "negative": 20
+    },
+    "BANK_ACCOUNT": {
+      "positive": 10,
+      "negative": 19
+    },
+    "CEP": {
+      "positive": 5,
+      "negative": 10
+    },
+    "CID": {
+      "positive": 5,
+      "negative": 6
+    },
+    "CNH": {
+      "positive": 5,
+      "negative": 6
+    },
+    "CNPJ": {
+      "positive": 9,
+      "negative": 5
+    },
+    "CODICE_FISCALE": {
+      "positive": 5,
+      "negative": 9
+    },
+    "CORPORATE": {
+      "positive": 5,
+      "negative": 6
+    },
+    "CPF": {
+      "positive": 10,
+      "negative": 7
+    },
+    "CREDIT_CARD": {
+      "positive": 5,
+      "negative": 11
+    },
+    "CUSTOM": {
+      "positive": 5,
+      "negative": 7
+    },
+    "DEVICE_ID": {
+      "positive": 10,
+      "negative": 6
+    },
+    "DNI": {
+      "positive": 10,
+      "negative": 10
+    },
+    "EIN": {
+      "positive": 5,
+      "negative": 9
+    },
+    "EMAIL": {
+      "positive": 5,
+      "negative": 7
+    },
+    "GOVERNMENT_ID": {
+      "positive": 10,
+      "negative": 5
+    },
+    "IBAN": {
+      "positive": 5,
+      "negative": 10
+    },
+    "IP_ADDRESS": {
+      "positive": 10,
+      "negative": 6
+    },
+    "LEGAL": {
+      "positive": 5,
+      "negative": 10
+    },
+    "MEDICAL_ID": {
+      "positive": 14,
+      "negative": 5
+    },
+    "MEDICATION": {
+      "positive": 5,
+      "negative": 16
+    },
+    "NHS": {
+      "positive": 5,
+      "negative": 5
+    },
+    "NINO": {
+      "positive": 5,
+      "negative": 6
+    },
+    "NIR": {
+      "positive": 5,
+      "negative": 5
+    },
+    "PASSPORT": {
+      "positive": 5,
+      "negative": 6
+    },
+    "PERSON": {
+      "positive": 5,
+      "negative": 7
+    },
+    "PHONE": {
+      "positive": 10,
+      "negative": 5
+    },
+    "PIX": {
+      "positive": 5,
+      "negative": 12
+    },
+    "RG": {
+      "positive": 5,
+      "negative": 5
+    },
+    "SECRET": {
+      "positive": 24,
+      "negative": 7
+    },
+    "SSN": {
+      "positive": 5,
+      "negative": 23
+    },
+    "SUS_CARD": {
+      "positive": 5,
+      "negative": 5
+    },
+    "VEHICLE": {
+      "positive": 19,
+      "negative": 5
+    }
+  },
+  "evaluation": "Bootstrap sem holdout independente; não usar para medir generalização."
+}
