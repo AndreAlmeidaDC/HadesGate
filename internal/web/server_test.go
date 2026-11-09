@@ -1274,3 +1274,37 @@ func TestServer_AuthAttemptsAreAudited(t *testing.T) {
 		t.Fatalf("rapid failures must be debounced: before=%d after=%d", before, len(after))
 	}
 }
+
+func TestServer_ConfigRestoreRequiresConfirmation(t *testing.T) {
+	const adminKey = "admin-secret-key"
+	srv, mux := setupTestServer(adminKey)
+	exported := httptest.NewRequest(http.MethodGet, "/api/config-backup", nil)
+	exported.Header.Set("Authorization", "Bearer "+adminKey)
+	exportedRec := httptest.NewRecorder()
+	mux.ServeHTTP(exportedRec, exported)
+	var envelope struct {
+		Backup string `json:"backup"`
+	}
+	if err := json.NewDecoder(exportedRec.Body).Decode(&envelope); err != nil || envelope.Backup == "" {
+		t.Fatalf("export failed: %s", exportedRec.Body.String())
+	}
+
+	post := func(body string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/config-backup", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+adminKey)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{"backup": envelope.Backup})
+	if code := post(string(payload)); code != http.StatusPreconditionRequired {
+		t.Fatalf("restore without confirm must be refused with 428, got %d", code)
+	}
+	payload, _ = json.Marshal(map[string]interface{}{"backup": envelope.Backup, "confirm": true})
+	if code := post(string(payload)); code != http.StatusOK {
+		t.Fatalf("confirmed restore failed with %d", code)
+	}
+	_ = srv
+}
