@@ -130,3 +130,56 @@ func TestDispatcher_TestDispatchTarget_Validation(t *testing.T) {
 	}
 }
 
+// TestDispatcher_UpdateConfigWhileDelivering exercises the hot-reload path
+// against in-flight deliveries: UpdateConfig rewrites the shared HTTP client
+// timeout while the worker goroutine and synchronous test dispatches use it.
+func TestDispatcher_UpdateConfigWhileDelivering(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	d := NewDispatcher(Config{URL: server.URL, Secret: "s", Events: map[string]bool{"*": true}})
+	defer d.Close()
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Concurrent config reloads, the shape used by PUT /api/config and the GUI.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			timeout := time.Duration(2+i%3) * time.Second
+			d.UpdateConfig(Config{URL: server.URL, Secret: "s", Timeout: timeout})
+		}
+	}()
+
+	// Concurrent deliveries through the shared client.
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err := d.TestDispatchTarget(server.URL, "", Event{Event: "test_ping"}); err != nil {
+					t.Errorf("dispatch failed during reload: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	time.Sleep(500 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+}

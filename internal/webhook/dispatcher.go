@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,7 +45,7 @@ type Config struct {
 type Dispatcher struct {
 	mu         sync.RWMutex
 	cfg        Config
-	client     *http.Client
+	client     atomic.Pointer[http.Client]
 	eventQueue chan Event
 	wg         sync.WaitGroup
 	stopChan   chan struct{}
@@ -52,20 +53,22 @@ type Dispatcher struct {
 	workerOnce sync.Once
 }
 
+func newHTTPClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	return &http.Client{Timeout: timeout}
+}
+
 // NewDispatcher creates and starts an asynchronous webhook worker.
 func NewDispatcher(cfg Config) *Dispatcher {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Second
-	}
 	cfg.Events = cloneEvents(cfg.Events)
 	d := &Dispatcher{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: cfg.Timeout,
-		},
+		cfg:        cfg,
 		eventQueue: make(chan Event, 1024),
 		stopChan:   make(chan struct{}),
 	}
+	d.client.Store(newHTTPClient(cfg.Timeout))
 
 	if cfg.URL != "" {
 		d.startWorker()
@@ -94,7 +97,9 @@ func (d *Dispatcher) UpdateConfig(cfg Config) {
 	}
 	cfg.Events = cloneEvents(cfg.Events)
 	d.cfg = cfg
-	d.client.Timeout = cfg.Timeout
+	// Publish a fresh client instead of mutating Timeout on the shared one:
+	// net/http reads it on every Do while deliveries are in flight.
+	d.client.Store(newHTTPClient(cfg.Timeout))
 
 	if cfg.URL != "" {
 		d.startWorker()
@@ -180,7 +185,7 @@ func (d *Dispatcher) TestDispatchTarget(targetURL, secret string, evt Event) err
 		req.Header.Set("X-HadesGate-Signature", "sha256="+sig)
 	}
 
-	resp, err := d.client.Do(req)
+	resp, err := d.client.Load().Do(req)
 	if err != nil {
 		return fmt.Errorf("connecting to %s: %w", targetURL, err)
 	}
@@ -292,7 +297,7 @@ func (d *Dispatcher) send(evt Event) {
 		req.Header.Set("X-HadesGate-Signature", "sha256="+sig)
 	}
 
-	resp, err := d.client.Do(req)
+	resp, err := d.client.Load().Do(req)
 	if err != nil {
 		log.Printf("⚠️  [WEBHOOK] Failed to deliver webhook to %s: %v\n", url, err)
 		return
