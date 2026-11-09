@@ -1231,3 +1231,46 @@ func TestServer_AdminRateLimitAppliesAfterAuth(t *testing.T) {
 		t.Fatalf("unauthenticated call must still be 401, got %d", c)
 	}
 }
+
+func TestServer_AuthAttemptsAreAudited(t *testing.T) {
+	const adminKey = "admin-secret-key"
+	srv, mux := setupTestServer(adminKey)
+
+	verify := func(key string) {
+		body := `{"key":"` + key + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+	}
+
+	verify(adminKey)
+	verify("wrong-key")
+
+	events, err := srv.store.ListAuditEvents(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("listing audit events: %v", err)
+	}
+	var success, failure bool
+	for _, event := range events {
+		switch event.Action {
+		case "auth.success":
+			success = true
+			if event.ActorKeyID != "bootstrap" {
+				t.Fatalf("success must record the key id, got %q", event.ActorKeyID)
+			}
+		case "auth.failure":
+			failure = true
+		}
+	}
+	if !success || !failure {
+		t.Fatalf("expected a success and a failure event, got %+v", events)
+	}
+
+	// The failure is debounced, so a second rapid failure must not add a row.
+	before := len(events)
+	verify("wrong-key-again")
+	after, _ := srv.store.ListAuditEvents(context.Background(), 10)
+	if len(after) != before {
+		t.Fatalf("rapid failures must be debounced: before=%d after=%d", before, len(after))
+	}
+}

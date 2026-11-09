@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/url"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +42,8 @@ type Server struct {
 	upstream                  *proxy.UpstreamDispatcher
 	securityPolicy            *SecurityPolicy
 	adminLimiter              atomic.Pointer[proxy.RateLimiter]
+	auditMu                   sync.Mutex
+	lastAuthFailure           time.Time
 }
 
 // NewServer creates a new web Server.
@@ -128,6 +132,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/admin-credentials/rotate", s.requireRole(config.RoleAdmin, s.handleAdminCredentialRotate))
 	mux.HandleFunc("/api/retention", s.requireRoleByMethod(config.RoleViewer, config.RoleOperator, s.handleRetention))
 	mux.HandleFunc("/api/audit/events", s.requireRole(config.RoleViewer, s.handleAuditEvents))
+	mux.HandleFunc("/api/audit/verify", s.requireRole(config.RoleViewer, s.handleAuditVerify))
 	mux.HandleFunc("/api/config-backup", s.requireRole(config.RoleAdmin, s.handleConfigBackup))
 
 	// Static frontend assets handler
@@ -540,6 +545,9 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	json.NewEncoder(w).Encode(resp)
+	if r.URL.Query().Get("export") == "1" {
+		s.auditChange(r, "traces.exported", "tenant", requestedTenant, map[string]interface{}{"page": page, "limit": limit, "total": total})
+	}
 }
 
 type AuthVerifyRequest struct {
@@ -583,12 +591,47 @@ func (s *Server) handleAuthVerify(w http.ResponseWriter, r *http.Request) {
 	verifyRequest := r.Clone(r.Context())
 	verifyRequest.Header.Set("Authorization", "Bearer "+reqKey)
 	principal, isValid := s.authenticateAdmin(verifyRequest)
+	s.recordAuthAttempt(r, principal, isValid)
 	json.NewEncoder(w).Encode(AuthVerifyResponse{
 		Valid:   isValid,
 		DevMode: false,
 		KeyID:   principal.KeyID,
 		Role:    principal.Role,
 	})
+}
+
+// recordAuthAttempt writes an authentication event. Failures are debounced to
+// one every five seconds so an unauthenticated flood cannot fill the trail.
+func (s *Server) recordAuthAttempt(r *http.Request, principal adminPrincipal, ok bool) {
+	if s.store == nil {
+		return
+	}
+	action := "auth.success"
+	if !ok {
+		action = "auth.failure"
+		s.auditMu.Lock()
+		if !s.lastAuthFailure.IsZero() && time.Since(s.lastAuthFailure) < 5*time.Second {
+			s.auditMu.Unlock()
+			return
+		}
+		s.lastAuthFailure = time.Now()
+		s.auditMu.Unlock()
+	}
+	actor := principal.KeyID
+	if actor == "" {
+		actor = "anonymous"
+	}
+	metadata, _ := json.Marshal(map[string]interface{}{"valid": ok, "remote": r.RemoteAddr})
+	if err := s.store.RecordAuditEvent(r.Context(), config.AuditEvent{
+		ActorKeyID: actor,
+		ActorRole:  config.RoleViewer,
+		Action:     action,
+		TargetType: "credential",
+		TargetID:   principal.KeyID,
+		Metadata:   metadata,
+	}); err != nil {
+		log.Printf("⚠️  [AUDIT] could not record %s: %v", action, err)
+	}
 }
 
 func (s *Server) reloadGateway(ctx context.Context) error {
