@@ -101,12 +101,31 @@ func (s *Server) SetSecurityPolicy(policy *SecurityPolicy) {
 
 func requestAPIKey(r *http.Request) string {
 	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
-		return strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		return trimBearer(authHeader)
 	}
 	if key := strings.TrimSpace(r.Header.Get("X-API-Key")); key != "" {
 		return key
 	}
 	return ""
+}
+
+// trimBearer strips a Bearer prefix case-insensitively.
+func trimBearer(header string) string {
+	header = strings.TrimSpace(header)
+	if len(header) >= 7 && strings.EqualFold(header[:7], "Bearer ") {
+		return strings.TrimSpace(header[7:])
+	}
+	return header
+}
+
+// clientIP prefers the first X-Forwarded-For hop for telemetry.
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		if first := strings.TrimSpace(strings.Split(forwarded, ",")[0]); first != "" {
+			return first
+		}
+	}
+	return r.RemoteAddr
 }
 
 // RegisterRoutes registers dashboard and management API endpoints on the given multiplexer.
@@ -355,7 +374,7 @@ func (s *Server) handleTestAnonymize(w http.ResponseWriter, r *http.Request) {
 				Action:          "block",
 				BlockedEntities: decision.Types,
 				Model:           model,
-				ClientIP:        r.RemoteAddr,
+				ClientIP:        clientIP(r),
 				Details:         "Extension prompt blocked by entity DLP policy",
 			})
 		}
@@ -733,7 +752,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		cfg, err := s.store.GetDynamicConfig(r.Context())
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 		globalConfigured := cfg.GlobalProxyKey != ""
@@ -759,7 +778,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := s.store.SaveDynamicConfig(r.Context(), newCfg); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 
@@ -872,7 +891,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		tenants, err := s.store.ListTenants(r.Context())
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 		if tenants == nil {
@@ -895,7 +914,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 		}
 		savedTenant, err := s.store.SaveTenant(r.Context(), tenant)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 
@@ -923,7 +942,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 			origID = payload.ID
 		}
 		if err := s.store.UpdateTenant(r.Context(), origID, payload.TenantConfig); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 
@@ -957,7 +976,7 @@ func (s *Server) handleTenants(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := s.store.DeleteTenant(r.Context(), id); err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusInternalServerError)
+			writeJSONError(w, http.StatusInternalServerError, "server_error", err.Error())
 			return
 		}
 

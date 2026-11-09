@@ -1308,3 +1308,15 @@ func TestServer_ConfigRestoreRequiresConfirmation(t *testing.T) {
 	}
 	_ = srv
 }
+
+func TestServer_AcceptsLowercaseBearerScheme(t *testing.T) {
+	const adminKey = "admin-secret-key"
+	_, mux := setupTestServer(adminKey)
+	req := httptest.NewRequest(http.MethodGet, "/api/vault", nil)
+	req.Header.Set("Authorization", "bearer "+adminKey)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("lowercase bearer must authenticate, got %d: %s", w.Code, w.Body.String())
+	}
+}

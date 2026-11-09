@@ -2,7 +2,6 @@ package web
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -114,7 +113,7 @@ func (s *Server) handleAdminCredentialRotate(w http.ResponseWriter, r *http.Requ
 
 	credential, err := s.store.RotateAdminCredential(r.Context(), keyID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
+		writeJSONError(w, http.StatusBadRequest, "server_error", err.Error())
 		return
 	}
 
@@ -233,7 +232,7 @@ func (s *Server) handleConfigBackup(w http.ResponseWriter, r *http.Request) {
 		}
 		report, err := s.store.RestoreEncryptedBackup(r.Context(), request.Backup)
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error":{"message":%q}}`, err.Error()), http.StatusBadRequest)
+			writeJSONError(w, http.StatusBadRequest, "server_error", err.Error())
 			return
 		}
 		if err := s.reloadGateway(r.Context()); err != nil {
